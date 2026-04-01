@@ -130,7 +130,7 @@ Casting Time: 2
 Area of Effect: 1 creature
 Saving Throw: None
 
-This is a more powerful version of the Heroism spell. For the next two hours, the targeted creature is blessed with an enchantment which increases their competence, granting them a +25% bonus to their Hit Points, setting their THAC0 to 60% of their base, and gaining a +4 bonus to all their Saving Throws. This spell and Heroism are non-cumulative with each other, and the more recently applied spell will remove the effects of the other.~
+This is a more powerful version of the Heroism spell. For the next two hours, the targeted creature is blessed with an enchantment which increases their competence, granting them a +15% bonus to their Hit Points, setting their THAC0 to 85% of their base, and gaining a +2 bonus to all their Saving Throws. This spell and Heroism are non-cumulative with each other, and the more recently applied spell will remove the effects of the other.~
 
 OUTER_SPRINT C0BW601_NAME1 ~Dirge~
 OUTER_SPRINT C0BW601_DESC ~Dirge

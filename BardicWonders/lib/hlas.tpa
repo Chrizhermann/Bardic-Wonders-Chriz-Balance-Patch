@@ -10,7 +10,7 @@ Requires: Prestissimo~
 COPY_EXISTING ~C0BWHL2.SPL~ ~OVERRIDE~
 SAY NAME1 ~Resonating Weapon~
 SAY UNIDENTIFIED_DESC ~Resonating Weapon
-The bard imbues the weapons of themselves and all allies with in a 20-ft. radius of them with the power of sound. For the next 5 rounds, all attacks made by affected allies cause all enemies within 10-ft. of the initial target to emanate a harmful wave of sound in a 5-ft. radius, dealing 2d6 magic damage and having a 20% chance to stun them for 1 round on a failed Saving Throw vs. Death at -5. Multiple sound waves that overlap may affect the same target, applying their effects consecutively.~
+The bard imbues the weapons of themselves and all allies with in a 20-ft. radius of them with the power of sound. For the next 5 rounds, all attacks made by affected allies cause all enemies within 10-ft. of the initial target to emanate a harmful wave of sound in a 5-ft. radius, dealing 2d6 magic damage and having a 10% chance to stun them for 1 round on a failed Saving Throw vs. Death at -2. Multiple sound waves that overlap may affect the same target, applying their effects consecutively.~
 
 ADD_PROJECTILE ~override/c0bwhl2r.PRO~ ~C0 Resonating Weapon AoE~
 ADD_PROJECTILE ~override/c0bwhl2p.PRO~ ~C0 Resonating Weapon Wave~
@@ -23,7 +23,7 @@ COPY_EXISTING ~C0BWHL2b.SPL~ ~OVERRIDE~
 COPY_EXISTING ~C0BWHL3.SPL~ ~OVERRIDE~
 SAY NAME1 ~Song of Freedom~
 SAY UNIDENTIFIED_DESC ~Song of Freedom
-Upon using this ability, the bard removes all charm, confusion, fear, feeblemind, hold, sleep, berserk, stun effects from allies in a 25-ft. radius around them and provides immunity to such effects for 1 turn.
+Upon using this ability, the bard removes all charm, confusion, fear, feeblemind, hold, sleep, berserk, stun effects from allies in a 25-ft. radius around them.
 
 Removes effects of Song of Heroism and Legionnaire's March.
 
@@ -52,7 +52,7 @@ END
 COPY_EXISTING ~C0BWHL5.SPL~ ~OVERRIDE~
 SAY NAME1 ~Song of Heroism~
 SAY UNIDENTIFIED_DESC ~Song of Heroism
-Upon using this ability, the bard grants temporary hit points equal to +4 per level of the bard and a +6 bonus to Armor Class and Saving Throws for 1 turn to all allies in a 25-ft. radius around them.
+Upon using this ability, the bard grants 20 temporary hit points and a +4 bonus to Armor Class and Saving Throws for 1 turn to all allies in a 25-ft. radius around them.
 
 Removes effects of Song of Heroism and Legionnaire's March.
 
@@ -61,7 +61,7 @@ This ability may be selected three times.~
 COPY_EXISTING ~C0BWHL6.SPL~ ~OVERRIDE~
 SAY NAME1 ~Hymn of Requiem~
 SAY UNIDENTIFIED_DESC ~Hymn of Requiem
-Upon using this ability, the bard instantly deals 60 unmitigated magic damage to enemies and heals 60 hit points to allies within a 25-ft. range of the bard. This song ignores all spell protections and magic resistance.
+Upon using this ability, the bard deals 6d10 magic damage to enemies (Save vs. Spell for half) and heals 6d10 hit points to allies within a 25-ft. range of the bard. This song ignores all spell protections and magic resistance.
 
 This ability may be selected once.~
 
@@ -195,7 +195,7 @@ INT_VAR
 STR_VAR 
     2da_row = C0BWHL2
     ability = GA_C0BWHL2       // New ability being added
-    num_allowed = 16
+    num_allowed = 8
   END
 
 LAF SIMPLE_ADD_HLA
@@ -371,7 +371,7 @@ LPF patch_remove_hla STR_VAR remove_ability = ~GA_SPCL923~ END
 LPF patch_add_hla STR_VAR 2da_row = ~C0GALL1~ ability = ~GA_C0BWHL3~ num_allowed = 3 END	
 LPF patch_add_hla STR_VAR 2da_row = ~C0GALL2~ ability = ~GA_C0BWHL4~ num_allowed = 3 END	
 LPF patch_add_hla STR_VAR 2da_row = ~C0GALL3~ ability = ~GA_C0BWHL5~ num_allowed = 3 END	
-LPF patch_add_hla STR_VAR 2da_row = ~C0GALL4~ ability = ~GA_C0BWHL2~ num_allowed = 16 END	
+LPF patch_add_hla STR_VAR 2da_row = ~C0GALL4~ ability = ~GA_C0BWHL2~ num_allowed = 8 END
 LPF patch_add_hla STR_VAR 2da_row = ~C0GALL5~ ability = ~AP_C0BWHL8~ num_allowed = 1 END	
 
 END
