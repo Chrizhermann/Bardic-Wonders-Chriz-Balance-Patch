@@ -1,8 +1,17 @@
 # Bardic Wonders — Balance Patch
 
-A balance patch for [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) by [The Artisan](https://artisans-corner.com/bardic-wonders/), a fantastic mod that overhauls and expands the Bard class for BG:EE, BG2:EE, EET, and IWD:EE.
+A personal balance-patch fork of [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) by **Artemius_I** (also known as **The Artisan** / **AionZ**), a fantastic mod that overhauls and expands the Bard class for BG:EE, BG2:EE, EET, and IWD:EE. All kit concepts, spell design, items, and creative direction are the original author's work; this fork only adjusts numbers for personal balance preferences while keeping the spirit of each ability intact.
 
-All credit for the original mod — the kit designs, spells, items, and overall vision — goes to The Artisan. This fork only adjusts numbers for personal balance preferences while keeping the spirit of each ability intact.
+## Credit & original author
+
+Bardic Wonders is designed and maintained by **Artemius_I**. If you enjoy the mod, please support him directly:
+
+- **Website:** https://theartisanbg.github.io/The-Artisans-Corner/
+- **Upstream repository:** https://github.com/TheArtisanBG/Bardic-Wonders
+- **Patreon:** https://www.patreon.com/Artemius_I
+- **Discord:** https://discord.gg/MWraGyf
+
+This fork exists strictly because I wanted a few balance knobs turned differently in my own install — it is not a replacement for, or a competing project against, the upstream mod.
 
 ## What This Patch Changes
 
@@ -22,5 +31,4 @@ Install [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) first, 
 
 ## Acknowledgments
 
-- **The Artisan** — original mod author. The kit concepts, spell design, and creative direction are all theirs.
 - **Argent77** — `a7#add_kit_ex.tpa` library used by the original mod.
