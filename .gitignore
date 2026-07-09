@@ -1,2 +1,5 @@
 
 *.zip
+
+# Internal Claude Code planning artifacts (not for release)
+docs/plans/
