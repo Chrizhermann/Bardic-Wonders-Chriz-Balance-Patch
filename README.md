@@ -2,6 +2,20 @@
 
 A personal balance-patch fork of [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) by **Artemius_I** (also known as **The Artisan** / **AionZ**), a fantastic mod that overhauls and expands the Bard class for BG:EE, BG2:EE, EET, and IWD:EE. All kit concepts, spell design, items, and creative direction are the original author's work; this fork only adjusts numbers for personal balance preferences while keeping the spirit of each ability intact.
 
+> [!WARNING]
+> **SPELL REVISIONS COMPATIBILITY — PHASE 0**
+>
+> **Do not include the Darkbloom Bard kit (component `1006`) in recommended
+> Spell Revisions installs or mod collections for now.** Darkbloom imports
+> spells by fixed physical `SPPRxxx` filenames. Under SR, those slots can hold
+> different spells: the inspected install produced Strength of Stone instead
+> of Curse, Cause Moderate Wounds instead of Beast Claw, Icelance instead of
+> Mold Touch, and Healing Mist instead of Mist of Eldath.
+>
+> This failure is local to Darkbloom's copied spell list. It is separate from
+> Artisan's Kitpack Favored Soul's global priest-delivery problem and does not
+> by itself rewrite Cleric, Druid, Paladin, or Ranger spellbooks.
+
 ## Credit & original author
 
 Bardic Wonders is designed and maintained by **Artemius_I**. If you enjoy the mod, please support him directly:
@@ -28,6 +42,19 @@ This fork exists strictly because I wanted a few balance knobs turned differentl
 ## Installation
 
 Install [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) first, then install this patch over it. Standard WeiDU installation.
+
+### Deferred compatibility fixes
+
+Phase 0 documents the exclusion without changing installer or spell code. The
+later compatibility implementation must:
+
+- resolve Darkbloom's intended spells semantically and validate a bundled
+  fallback instead of assuming fixed `SPPRxxx` slots;
+- audit the other priest-spell clones in New Bard Spells, Troubadour, and
+  Deathsinger under both vanilla and Spell Revisions;
+- make New Bard Spells/Gallant integration independent of component order; and
+- add install-and-uninstall fixtures that verify spell identity, mechanics,
+  type, level, and class availability before the warning is removed.
 
 ## Acknowledgments
 
