@@ -1,0 +1,1650 @@
+DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_EFF_RESERVED_FIELDS
+  RET
+    valid
+BEGIN
+  SET valid = 0
+  PATCH_IF (BUFFER_LENGTH = 0x110) BEGIN
+    SET reserved_valid = 1
+    FOR (reserved_offset = 0x38; reserved_offset < 0x80; ++reserved_offset) BEGIN
+      READ_BYTE reserved_offset reserved_byte
+      PATCH_IF (reserved_byte != 0) BEGIN SET reserved_valid = 0 END
+    END
+    FOR (reserved_offset = 0x80; reserved_offset < 0x90; ++reserved_offset) BEGIN
+      READ_BYTE reserved_offset reserved_byte
+      PATCH_IF (reserved_byte != 0xff) BEGIN SET reserved_valid = 0 END
+    END
+    FOR (reserved_offset = 0x90; reserved_offset < 0xa4; ++reserved_offset) BEGIN
+      READ_BYTE reserved_offset reserved_byte
+      PATCH_IF (reserved_byte != 0) BEGIN SET reserved_valid = 0 END
+    END
+    FOR (reserved_offset = 0xa4; reserved_offset < 0xa8; ++reserved_offset) BEGIN
+      READ_BYTE reserved_offset reserved_byte
+      PATCH_IF (reserved_byte != 0xff) BEGIN SET reserved_valid = 0 END
+    END
+    FOR (reserved_offset = 0xa8; reserved_offset < 0xcc; ++reserved_offset) BEGIN
+      READ_BYTE reserved_offset reserved_byte
+      PATCH_IF (reserved_byte != 0) BEGIN SET reserved_valid = 0 END
+    END
+    READ_LONG 0xcc caster_level
+    FOR (reserved_offset = 0xd0; reserved_offset < 0x110; ++reserved_offset) BEGIN
+      READ_BYTE reserved_offset reserved_byte
+      PATCH_IF (reserved_byte != 0) BEGIN SET reserved_valid = 0 END
+    END
+    PATCH_IF (reserved_valid = 1) AND (caster_level = 1) BEGIN SET valid = 1 END
+  END
+END
+
+DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_PAYLOAD_EFF
+  STR_VAR
+    expected_resource = ~~
+  RET
+    valid
+BEGIN
+  SET valid = 0
+  LPF C0_VALIDATE_ABETTOR_EFF_RESERVED_FIELDS RET reserved_fields_valid = valid END
+  PATCH_IF (BUFFER_LENGTH >= 0x110) BEGIN
+    READ_ASCII 0 signature (8)
+    READ_ASCII 0x08 secondary_signature (8)
+    READ_LONG 0x10 opcode
+    READ_LONG 0x14 target
+    READ_LONG 0x18 power
+    READ_LONG 0x1c parameter1
+    READ_LONG 0x20 parameter2
+    READ_LONG 0x24 timing
+    READ_LONG 0x28 duration
+    READ_SHORT 0x2c probability1
+    READ_SHORT 0x2e probability2
+    READ_ASCII 0x30 resource (8) NULL
+    SET resource_length = STRING_LENGTH ~%resource%~
+    SET resource_padding_valid = 1
+    FOR (resource_index = resource_length; resource_index < 8; ++resource_index) BEGIN
+      READ_BYTE (0x30 + resource_index) resource_padding_byte
+      PATCH_IF (resource_padding_byte != 0) BEGIN
+        SET resource_padding_valid = 0
+      END
+    END
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
+      AND (~%secondary_signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
+      AND (opcode = 146)
+      AND (target = 1)
+      AND (power = 0)
+      AND (parameter1 = 0)
+      AND (parameter2 = 1)
+      AND (timing = 1)
+      AND (duration = 0)
+      AND (probability1 = 100)
+      AND (probability2 = 0)
+      AND (~%resource%~ STRING_EQUAL_CASE ~%expected_resource%~)
+      AND (resource_padding_valid = 1)
+      AND (reserved_fields_valid = 1)
+    BEGIN
+      SET valid = 1
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_FINITE_CONTROLLER
+  INT_VAR
+    expected_start_hooks = 0
+    expected_end_hooks = 0
+  STR_VAR
+    expected_payload = ~~
+  RET
+    valid
+    ability_count
+BEGIN
+  SET valid = 0
+  SET ability_count = 0
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 signature (8)
+    READ_SHORT 0x1c spell_type
+    READ_LONG 0x64 ability_offset
+    READ_SHORT 0x68 ability_count
+    READ_LONG 0x6a effect_offset
+    READ_SHORT 0x6e first_global_effect
+    READ_SHORT 0x70 global_effect_count
+    SET first_global_offset = effect_offset + first_global_effect * 0x30
+    SET global_effect_end = first_global_offset + global_effect_count * 0x30
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
+      AND (spell_type = 5)
+      AND (ability_count > 0)
+      // C0BARDSO contributes its two casting-level reset/start effects.
+      AND (global_effect_count = 2)
+      AND ((ability_offset + ability_count * 0x28) <= BUFFER_LENGTH)
+      AND (global_effect_end <= BUFFER_LENGTH)
+    BEGIN
+      SET global_effects_valid = 0
+      SET global_reset = first_global_offset
+      SET global_start = first_global_offset + 0x30
+      READ_SHORT global_reset global_reset_opcode
+      READ_BYTE (global_reset + 0x02) global_reset_target
+      READ_BYTE (global_reset + 0x03) global_reset_power
+      READ_LONG (global_reset + 0x04) global_reset_parameter1
+      READ_LONG (global_reset + 0x08) global_reset_parameter2
+      READ_BYTE (global_reset + 0x0c) global_reset_timing
+      READ_BYTE (global_reset + 0x0d) global_reset_resist_dispel
+      READ_LONG (global_reset + 0x0e) global_reset_duration
+      READ_BYTE (global_reset + 0x12) global_reset_probability1
+      READ_BYTE (global_reset + 0x13) global_reset_probability2
+      READ_ASCII (global_reset + 0x14) global_reset_resource (8) NULL
+      READ_LONG (global_reset + 0x1c) global_reset_dice_count
+      READ_LONG (global_reset + 0x20) global_reset_dice_size
+      READ_LONG (global_reset + 0x24) global_reset_save_type
+      READ_LONG (global_reset + 0x28) global_reset_save_bonus
+      READ_LONG (global_reset + 0x2c) global_reset_special
+      READ_SHORT global_start global_start_opcode
+      READ_BYTE (global_start + 0x02) global_start_target
+      READ_BYTE (global_start + 0x03) global_start_power
+      READ_LONG (global_start + 0x04) global_start_parameter1
+      READ_LONG (global_start + 0x08) global_start_parameter2
+      READ_BYTE (global_start + 0x0c) global_start_timing
+      READ_BYTE (global_start + 0x0d) global_start_resist_dispel
+      READ_LONG (global_start + 0x0e) global_start_duration
+      READ_BYTE (global_start + 0x12) global_start_probability1
+      READ_BYTE (global_start + 0x13) global_start_probability2
+      READ_ASCII (global_start + 0x14) global_start_resource (8) NULL
+      READ_LONG (global_start + 0x1c) global_start_dice_count
+      READ_LONG (global_start + 0x20) global_start_dice_size
+      READ_LONG (global_start + 0x24) global_start_save_type
+      READ_LONG (global_start + 0x28) global_start_save_bonus
+      READ_LONG (global_start + 0x2c) global_start_special
+      PATCH_IF
+        (global_reset_opcode = 136)
+        AND (global_reset_target = 9)
+        AND (global_reset_power = 0)
+        AND (global_reset_parameter1 = 0)
+        AND (global_reset_parameter2 = 0)
+        AND (global_reset_timing = 1)
+        AND (global_reset_resist_dispel = 0)
+        AND (global_reset_duration = 0)
+        AND (global_reset_probability1 = 100)
+        AND (global_reset_probability2 = 0)
+        AND (~%global_reset_resource%~ STRING_EQUAL_CASE ~~)
+        AND (global_reset_dice_count = 0)
+        AND (global_reset_dice_size = 0)
+        AND (global_reset_save_type = 0)
+        AND (global_reset_save_bonus = 0)
+        AND (global_reset_special = 0)
+        AND (global_start_opcode = 146)
+        AND (global_start_target = 9)
+        AND (global_start_power = 0)
+        AND (global_start_parameter1 = 0)
+        AND (global_start_parameter2 = 1)
+        AND (global_start_timing = 1)
+        AND (global_start_resist_dispel = 0)
+        AND (global_start_duration = 0)
+        AND (global_start_probability1 = 100)
+        AND (global_start_probability2 = 0)
+        AND (~%global_start_resource%~ STRING_EQUAL_CASE ~C0BARDSX~)
+        AND (global_start_dice_count = 0)
+        AND (global_start_dice_size = 0)
+        AND (global_start_save_type = 0)
+        AND (global_start_save_bonus = 0)
+        AND (global_start_special = 0)
+      BEGIN
+        SET global_effects_valid = 1
+      END
+      SET valid_headers = 0
+      FOR (header_index = 0; header_index < ability_count; ++header_index) BEGIN
+        SET header_offset = ability_offset + header_index * 0x28
+        READ_BYTE header_offset ability_type
+        READ_BYTE (header_offset + 0x01) ability_unknown
+        READ_SHORT (header_offset + 0x02) ability_location
+        READ_ASCII (header_offset + 0x04) ability_icon (8) NULL
+        READ_BYTE (header_offset + 0x0c) ability_target
+        READ_BYTE (header_offset + 0x0d) ability_target_count
+        READ_SHORT (header_offset + 0x0e) ability_range
+        READ_SHORT (header_offset + 0x10) ability_required_level
+        READ_SHORT (header_offset + 0x12) ability_casting_time
+        READ_SHORT (header_offset + 0x14) ability_times_per_day
+        READ_SHORT (header_offset + 0x16) ability_dice_sides
+        READ_SHORT (header_offset + 0x18) ability_dice_thrown
+        READ_SHORT (header_offset + 0x1a) ability_enchanted
+        READ_SHORT (header_offset + 0x1c) ability_damage_type
+        READ_SHORT (header_offset + 0x1e) header_effect_count
+        READ_SHORT (header_offset + 0x20) first_effect
+        READ_SHORT (header_offset + 0x22) ability_charges
+        READ_SHORT (header_offset + 0x24) ability_depletion
+        READ_SHORT (header_offset + 0x26) ability_projectile
+        SET first_effect_offset = effect_offset + first_effect * 0x30
+        SET header_effect_end = first_effect_offset + header_effect_count * 0x30
+        PATCH_IF
+          (ability_type = 1)
+          AND (ability_unknown = 0)
+          AND (ability_location = 4)
+          AND (~%ability_icon%~ STRING_EQUAL_CASE ~~)
+          AND (ability_target = 1)
+          AND (ability_target_count = 0)
+          AND (ability_range = 1)
+          AND (ability_required_level > 0)
+          AND (ability_casting_time = 0)
+          AND (ability_times_per_day = 0)
+          AND (ability_dice_sides = 0)
+          AND (ability_dice_thrown = 0)
+          AND (ability_enchanted = 0)
+          AND (ability_damage_type = 1)
+          AND (ability_charges = 1)
+          AND (ability_depletion = 1)
+          AND (ability_projectile = 1)
+          AND (header_effect_end <= BUFFER_LENGTH)
+        BEGIN
+          SET generic_start_count = 0
+          SET generic_repeat_count = 0
+          SET generic_end_count = 0
+          SET generic_end_selector_count = 0
+          SET reset_count = 0
+          SET cast_count = 0
+          SET cooldown_count = 0
+          SET payload_once_count = 0
+          SET payload_repeat_count = 0
+          SET start_hook_count = 0
+          SET end_hook_count = 0
+          SET start_hook_resource_count = 0
+          SET end_hook_resource_count = 0
+          SET direct_invisibility_resource_count = 0
+          SET once_duration = 0
+          SET repeat_duration = 0
+          SET end_duration = 0
+          SET generic_repeat_duration = 0
+          SET cooldown_duration = 0
+          FOR (
+            effect_index = 0;
+            effect_index < header_effect_count;
+            ++effect_index
+          ) BEGIN
+            SET current_effect = first_effect_offset + effect_index * 0x30
+            READ_SHORT current_effect opcode
+            READ_BYTE (current_effect + 0x02) target
+            READ_BYTE (current_effect + 0x03) power
+            READ_LONG (current_effect + 0x04) parameter1
+            READ_LONG (current_effect + 0x08) parameter2
+            READ_BYTE (current_effect + 0x0c) timing
+            READ_BYTE (current_effect + 0x0d) resist_dispel
+            READ_LONG (current_effect + 0x0e) duration
+            READ_BYTE (current_effect + 0x12) probability1
+            READ_BYTE (current_effect + 0x13) probability2
+            READ_ASCII (current_effect + 0x14) resource (8) NULL
+            READ_LONG (current_effect + 0x1c) dice_count
+            READ_LONG (current_effect + 0x20) dice_size
+            READ_LONG (current_effect + 0x24) save_type
+            READ_LONG (current_effect + 0x28) save_bonus
+            READ_LONG (current_effect + 0x2c) special
+
+            // Reserved hook resources must not already appear in a partial or
+            // malformed state that the exact semantic counters would ignore.
+            PATCH_IF (~%resource%~ STRING_EQUAL_CASE ~C0ABIVS~) BEGIN
+              SET start_hook_resource_count += 1
+            END
+            PATCH_IF (~%resource%~ STRING_EQUAL_CASE ~C0ABIVE~) BEGIN
+              SET end_hook_resource_count += 1
+            END
+            PATCH_IF (~%resource%~ STRING_EQUAL_CASE ~C0ABIVI~) BEGIN
+              SET direct_invisibility_resource_count += 1
+            END
+
+            SET inherited_fields_valid = 0
+            PATCH_IF
+              (power = 0)
+              AND (resist_dispel = 0)
+              AND (dice_count = 0)
+              AND (dice_size = 0)
+              AND (save_type = 0)
+              AND (save_bonus = 0)
+            BEGIN
+              SET inherited_fields_valid = 1
+            END
+
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND (opcode = 138)
+              AND (target = 9)
+              AND (parameter1 = 0)
+              AND (parameter2 = 2)
+              AND (timing = 1)
+              AND (duration = 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~~)
+              AND (special = 0)
+            BEGIN
+              SET reset_count += 1
+            END
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND (opcode = 146)
+              AND (target = 9)
+              AND (parameter1 = 0)
+              AND (parameter2 = 1)
+              AND (timing = 1)
+              AND (duration = 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0BARDSX~)
+              AND (special = 0)
+            BEGIN
+              SET cast_count += 1
+            END
+
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND
+              (opcode = 177)
+              AND (target = 9)
+              AND (power = 0)
+              AND (parameter1 = 0)
+              AND (parameter2 = 2)
+              AND (timing = 1)
+              AND (duration = 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0SINGIN~)
+              AND (special = 0)
+            BEGIN
+              SET generic_start_count += 1
+            END
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND
+              (opcode = 272)
+              AND (target = 9)
+              AND (power = 0)
+              AND (parameter1 = 6)
+              AND (parameter2 = 3)
+              AND (timing = 10)
+              AND (duration > 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0SINGI2~)
+              AND (special = 40)
+            BEGIN
+              SET generic_end_count += 1
+              SET end_duration = duration
+            END
+            // CLONE_EFFECT cannot match the donor's dynamic duration.  Refuse
+            // any second effect that its otherwise-exact selector could clone.
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND
+              (opcode = 272)
+              AND (target = 9)
+              AND (power = 0)
+              AND (parameter1 = 6)
+              AND (parameter2 = 3)
+              AND (timing = 10)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0SINGI2~)
+              AND (special = 40)
+            BEGIN
+              SET generic_end_selector_count += 1
+            END
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND
+              (opcode = 177)
+              AND (target = 9)
+              AND (power = 0)
+              AND (parameter1 = 0)
+              AND (parameter2 = 2)
+              AND (timing = 10)
+              AND (duration > 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~%expected_payload%~)
+              AND (special = 0)
+            BEGIN
+              SET payload_once_count += 1
+              SET once_duration = duration
+            END
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND
+              (opcode = 272)
+              AND (target = 9)
+              AND (power = 0)
+              AND (parameter1 = 6)
+              AND (parameter2 = 3)
+              AND (timing = 10)
+              AND (duration > 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~%expected_payload%~)
+              AND (special = 40)
+            BEGIN
+              SET payload_repeat_count += 1
+              SET repeat_duration = duration
+            END
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND (opcode = 272)
+              AND (target = 9)
+              AND (parameter1 = 6)
+              AND (parameter2 = 3)
+              AND (timing = 10)
+              AND (duration > 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0SINGIN~)
+              AND (special = 40)
+            BEGIN
+              SET generic_repeat_count += 1
+              SET generic_repeat_duration = duration
+            END
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND (opcode = 328)
+              AND (target = 9)
+              AND (parameter1 = 0)
+              AND (parameter2 = 85)
+              AND (timing = 10)
+              AND (duration > 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~%expected_payload%~)
+              AND (special = 1)
+            BEGIN
+              SET cooldown_count += 1
+              SET cooldown_duration = duration
+            END
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND
+              (opcode = 177)
+              AND (target = 9)
+              AND (power = 0)
+              AND (parameter1 = 0)
+              AND (parameter2 = 2)
+              AND (timing = 1)
+              AND (duration = 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0ABIVS~)
+              AND (special = 0)
+            BEGIN
+              SET start_hook_count += 1
+            END
+            PATCH_IF
+              (inherited_fields_valid = 1)
+              AND
+              (opcode = 272)
+              AND (target = 9)
+              AND (power = 0)
+              AND (parameter1 = 6)
+              AND (parameter2 = 3)
+              AND (timing = 10)
+              AND (duration > 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0ABIVE~)
+              AND (special = 40)
+            BEGIN
+              SET end_hook_count += 1
+            END
+          END
+          PATCH_IF
+            (generic_start_count = 1)
+            AND (generic_repeat_count = 1)
+            AND (generic_end_count = 1)
+            AND (generic_end_selector_count = 1)
+            AND (reset_count = 1)
+            AND (cast_count = 1)
+            AND (cooldown_count = 1)
+            AND (payload_once_count = 1)
+            AND (payload_repeat_count = 1)
+            AND (start_hook_resource_count = expected_start_hooks)
+            AND (start_hook_count = expected_start_hooks)
+            AND (end_hook_resource_count = expected_end_hooks)
+            AND (end_hook_count = expected_end_hooks)
+            AND (direct_invisibility_resource_count = 0)
+            AND (once_duration = repeat_duration)
+            AND (repeat_duration = end_duration)
+            AND (end_duration = generic_repeat_duration)
+            AND (generic_repeat_duration = cooldown_duration)
+          BEGIN
+            SET valid_headers += 1
+          END
+        END
+      END
+      PATCH_IF (global_effects_valid = 1) AND (valid_headers = ability_count) BEGIN
+        SET valid = 1
+      END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_PAYLOAD
+  STR_VAR
+    expected_payload = ~~
+  RET
+    state
+    party_projectile
+    c0bsngef_count
+BEGIN
+  SET state = 0
+  SET party_projectile = 0
+  SET c0bsngef_count = 0
+  SET old_33 = 0
+  SET old_34 = 0
+  SET old_35 = 0
+  SET old_36 = 0
+  SET old_37 = 0
+  SET new_33 = 0
+  SET new_34 = 0
+  SET new_35 = 0
+  SET new_36 = 0
+  SET new_37 = 0
+  SET skill_92 = 0
+  SET skill_91 = 0
+  SET skill_90 = 0
+  SET skill_275 = 0
+  SET skill_59 = 0
+  SET skill_276 = 0
+  SET skill_277 = 0
+  SET trap_detection_count = 0
+  SET blur_count = 0
+  SET party_ac_count = 0
+  SET nondetection_count = 0
+  SET singer_invisibility_count = 0
+  SET spell_state_40 = 0
+  SET spell_state_58 = 0
+  SET spell_state_31 = 0
+  SET portrait_icon_count = 0
+  SET luck_count = 0
+  SET damage_luck_count = 0
+  SET general_ac_count = 0
+  SET missile_ac_count = 0
+  SET good_bonus_count = 0
+  SET backstab_count = 0
+  SET random_invisibility_count = 0
+  SET time_stop_count = 0
+  SET self_removal_count = 0
+  SET save_33_family = 0
+  SET save_34_family = 0
+  SET save_35_family = 0
+  SET save_36_family = 0
+  SET save_37_family = 0
+  SET luck_family = 0
+  SET damage_luck_family = 0
+  SET good_bonus_family = 0
+  SET backstab_family = 0
+  SET time_stop_family = 0
+
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 signature (8)
+    READ_SHORT 0x1c spell_type
+    READ_LONG 0x64 ability_offset
+    READ_SHORT 0x68 ability_count
+    READ_LONG 0x6a effect_offset
+    READ_SHORT 0x70 global_effect_count
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
+      AND (spell_type = 5)
+      AND (ability_count = 1)
+      AND (global_effect_count = 0)
+      AND ((ability_offset + 0x28) <= BUFFER_LENGTH)
+    BEGIN
+      READ_BYTE ability_offset ability_type
+      READ_BYTE (ability_offset + 0x01) ability_unknown
+      READ_SHORT (ability_offset + 0x02) ability_location
+      READ_ASCII (ability_offset + 0x04) ability_icon (8) NULL
+      READ_BYTE (ability_offset + 0x0c) ability_target
+      READ_BYTE (ability_offset + 0x0d) ability_target_count
+      READ_SHORT (ability_offset + 0x0e) ability_range
+      READ_SHORT (ability_offset + 0x10) ability_required_level
+      READ_SHORT (ability_offset + 0x12) ability_casting_time
+      READ_SHORT (ability_offset + 0x14) ability_times_per_day
+      READ_SHORT (ability_offset + 0x16) ability_dice_sides
+      READ_SHORT (ability_offset + 0x18) ability_dice_thrown
+      READ_SHORT (ability_offset + 0x1a) ability_enchanted
+      READ_SHORT (ability_offset + 0x1c) ability_damage_type
+      READ_SHORT (ability_offset + 0x1e) effect_count
+      READ_SHORT (ability_offset + 0x20) first_effect
+      READ_SHORT (ability_offset + 0x22) ability_charges
+      READ_SHORT (ability_offset + 0x24) ability_depletion
+      READ_SHORT (ability_offset + 0x26) party_projectile
+      SET first_effect_offset = effect_offset + first_effect * 0x30
+      PATCH_IF
+        (ability_type = 1)
+        AND (ability_unknown = 0)
+        AND (ability_location = 4)
+        AND (~%ability_icon%~ STRING_EQUAL_CASE ~~)
+        AND (ability_target = 5)
+        AND (ability_target_count = 0)
+        AND (ability_range = 50)
+        AND (ability_required_level = 1)
+        AND (ability_casting_time = 0)
+        AND (ability_times_per_day = 0)
+        AND (ability_dice_sides = 6)
+        AND (ability_dice_thrown = 0)
+        AND (ability_enchanted = 0)
+        AND (ability_damage_type = 1)
+        AND (first_effect = 0)
+        AND (ability_charges = 1)
+        AND (ability_depletion = 1)
+        AND (party_projectile = 158)
+        AND ((first_effect_offset + effect_count * 0x30) <= BUFFER_LENGTH)
+      BEGIN
+        FOR (effect_index = 0; effect_index < effect_count; ++effect_index) BEGIN
+          SET current_effect = first_effect_offset + effect_index * 0x30
+          READ_SHORT current_effect opcode
+          READ_BYTE (current_effect + 0x02) target
+          READ_BYTE (current_effect + 0x03) power
+          READ_LONG (current_effect + 0x04) parameter1
+          READ_LONG (current_effect + 0x08) parameter2
+          READ_BYTE (current_effect + 0x0c) timing
+          READ_BYTE (current_effect + 0x0d) resist_dispel
+          READ_LONG (current_effect + 0x0e) duration
+          READ_BYTE (current_effect + 0x12) probability1
+          READ_BYTE (current_effect + 0x13) probability2
+          READ_ASCII (current_effect + 0x14) resource (8) NULL
+          READ_LONG (current_effect + 0x1c) dice_count
+          READ_LONG (current_effect + 0x20) dice_size
+          READ_LONG (current_effect + 0x24) save_type
+          READ_LONG (current_effect + 0x28) save_bonus
+          READ_LONG (current_effect + 0x2c) special
+          SET effect_tail_valid = 0
+          PATCH_IF
+            (resist_dispel = 0)
+            AND (dice_count = 0)
+            AND (dice_size = 0)
+            AND (save_type = 0)
+            AND (save_bonus = 0)
+            AND (special = 0)
+          BEGIN
+            SET effect_tail_valid = 1
+          END
+
+          SET save_family_core = 0
+          PATCH_IF
+            (target = 2)
+            AND (power = 0)
+            AND (parameter2 = 0)
+            AND (timing = 0)
+            AND (duration = 6)
+            AND (probability1 = 100)
+            AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+          BEGIN
+            SET save_family_core = 1
+          END
+          PATCH_IF (save_family_core = 1) AND (opcode = 33) BEGIN SET save_33_family += 1 END
+          PATCH_IF (save_family_core = 1) AND (opcode = 34) BEGIN SET save_34_family += 1 END
+          PATCH_IF (save_family_core = 1) AND (opcode = 35) BEGIN SET save_35_family += 1 END
+          PATCH_IF (save_family_core = 1) AND (opcode = 36) BEGIN SET save_36_family += 1 END
+          PATCH_IF (save_family_core = 1) AND (opcode = 37) BEGIN SET save_37_family += 1 END
+          PATCH_IF
+            (opcode = 22) AND (target = 1) AND (power = 0)
+            AND (parameter2 = 0) AND (timing = 0) AND (duration = 6)
+            AND (probability1 = 100) AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+          BEGIN SET luck_family += 1 END
+          PATCH_IF
+            (opcode = 250) AND (target = 1) AND (power = 0)
+            AND (parameter2 = 0) AND (timing = 0) AND (duration = 6)
+            AND (probability1 = 100) AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+          BEGIN SET damage_luck_family += 1 END
+          PATCH_IF
+            (opcode = 219) AND (target = 1) AND (power = 0)
+            AND (parameter2 = 8) AND (timing = 0) AND (duration = 6)
+            AND (probability1 = 100) AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+          BEGIN SET good_bonus_family += 1 END
+          PATCH_IF
+            (opcode = 292) AND (target = 1) AND (power = 0)
+            AND (parameter1 = 0) AND (timing = 0) AND (duration = 6)
+            AND (probability1 = 100) AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+          BEGIN SET backstab_family += 1 END
+          PATCH_IF (opcode = 146) AND (target = 1)
+            AND (~%resource%~ STRING_EQUAL_CASE ~SPSD02~)
+          BEGIN
+            SET time_stop_family += 1
+          END
+
+          PATCH_IF
+            (opcode = 321)
+            AND (target = 2)
+            AND (power = 0)
+            AND (parameter1 = 0)
+            AND (parameter2 = 0)
+            AND (timing = 1)
+            AND (duration = 0)
+            AND (probability1 = 100)
+            AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~%expected_payload%~)
+            AND (effect_tail_valid = 1)
+          BEGIN
+            SET self_removal_count += 1
+          END
+
+          PATCH_IF
+            (target = 2)
+            AND (power = 0)
+            AND (parameter2 = 0)
+            AND (timing = 0)
+            AND (duration = 6)
+            AND (probability1 = 100)
+            AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+            AND (effect_tail_valid = 1)
+          BEGIN
+            PATCH_IF (opcode = 92) AND (parameter1 = 70) BEGIN SET skill_92 += 1 END
+            PATCH_IF (opcode = 91) AND (parameter1 = 70) BEGIN SET skill_91 += 1 END
+            PATCH_IF (opcode = 90) AND (parameter1 = 70) BEGIN SET skill_90 += 1 END
+            PATCH_IF (opcode = 275) AND (parameter1 = 70) BEGIN SET skill_275 += 1 END
+            PATCH_IF (opcode = 59) AND (parameter1 = 70) BEGIN SET skill_59 += 1 END
+            PATCH_IF (opcode = 276) AND (parameter1 = 70) BEGIN SET skill_276 += 1 END
+            PATCH_IF (opcode = 277) AND (parameter1 = 70) BEGIN SET skill_277 += 1 END
+            PATCH_IF (opcode = 150) AND (parameter1 = 0) BEGIN
+              SET trap_detection_count += 1
+            END
+            PATCH_IF (opcode = 65) AND (parameter1 = 0) BEGIN SET blur_count += 1 END
+            PATCH_IF (opcode = 0) AND (parameter1 = 3) BEGIN SET party_ac_count += 1 END
+            PATCH_IF (opcode = 69) AND (parameter1 = 0) BEGIN SET nondetection_count += 1 END
+            PATCH_IF (opcode = 33) AND (parameter1 = 5) BEGIN SET old_33 += 1 END
+            PATCH_IF (opcode = 34) AND (parameter1 = 5) BEGIN SET old_34 += 1 END
+            PATCH_IF (opcode = 35) AND (parameter1 = 5) BEGIN SET old_35 += 1 END
+            PATCH_IF (opcode = 36) AND (parameter1 = 5) BEGIN SET old_36 += 1 END
+            PATCH_IF (opcode = 37) AND (parameter1 = 5) BEGIN SET old_37 += 1 END
+            PATCH_IF (opcode = 33) AND (parameter1 = 1) BEGIN SET new_33 += 1 END
+            PATCH_IF (opcode = 34) AND (parameter1 = 1) BEGIN SET new_34 += 1 END
+            PATCH_IF (opcode = 35) AND (parameter1 = 1) BEGIN SET new_35 += 1 END
+            PATCH_IF (opcode = 36) AND (parameter1 = 1) BEGIN SET new_36 += 1 END
+            PATCH_IF (opcode = 37) AND (parameter1 = 1) BEGIN SET new_37 += 1 END
+          END
+
+          PATCH_IF
+            (target = 1)
+            AND (power = 0)
+            AND (timing = 0)
+            AND (duration = 6)
+            AND (probability1 = 100)
+            AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+            AND (effect_tail_valid = 1)
+          BEGIN
+            PATCH_IF (opcode = 22) AND (parameter1 = 6) AND (parameter2 = 0) BEGIN
+              SET luck_count += 1
+            END
+            PATCH_IF (opcode = 250) AND (parameter1 = 6) AND (parameter2 = 0) BEGIN
+              SET damage_luck_count += 1
+            END
+            PATCH_IF (opcode = 0) AND (parameter1 = 4) AND (parameter2 = 0) BEGIN
+              SET general_ac_count += 1
+            END
+            PATCH_IF (opcode = 0) AND (parameter1 = 4) AND (parameter2 = 2) BEGIN
+              SET missile_ac_count += 1
+            END
+            PATCH_IF (opcode = 219) AND (parameter1 = 1) AND (parameter2 = 8) BEGIN
+              SET good_bonus_count += 1
+            END
+            PATCH_IF (opcode = 292) AND (parameter1 = 0) AND (parameter2 = 1) BEGIN
+              SET backstab_count += 1
+            END
+            PATCH_IF (opcode = 20) AND (parameter1 = 0) AND (parameter2 = 1) BEGIN
+              SET singer_invisibility_count += 1
+            END
+          END
+
+          PATCH_IF
+            (opcode = 142)
+            AND (target = 2)
+            AND (power = 0)
+            AND (parameter1 = 0)
+            AND (timing = 0)
+            AND (duration = 6)
+            AND (probability1 = 100)
+            AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+            AND (effect_tail_valid = 1)
+          BEGIN
+            PATCH_IF (parameter2 = 40) BEGIN SET spell_state_40 += 1 END
+            PATCH_IF (parameter2 = 58) BEGIN SET spell_state_58 += 1 END
+            PATCH_IF (parameter2 = 31) BEGIN SET spell_state_31 += 1 END
+          END
+
+          PATCH_IF
+            (opcode = 215)
+            AND (target = 2)
+            AND (power = 0)
+            AND (parameter1 = 0)
+            AND (parameter2 = 1)
+            AND (timing = 0)
+            AND (duration = 8)
+            AND (probability1 = 100)
+            AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~C0ABETT1~)
+            AND (effect_tail_valid = 1)
+          BEGIN
+            SET portrait_icon_count += 1
+          END
+
+          PATCH_IF
+            (opcode = 20)
+            AND (target = 1)
+            AND (power = 0)
+            AND (parameter1 = 0)
+            AND (parameter2 = 0)
+            AND (timing = 0)
+            AND (duration = 12)
+            AND (probability1 = 20)
+            AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+            AND (effect_tail_valid = 1)
+          BEGIN
+            SET random_invisibility_count += 1
+          END
+
+          PATCH_IF
+            (opcode = 146)
+            AND (target = 1)
+            AND (power = 0)
+            AND (parameter1 = 0)
+            AND (parameter2 = 1)
+            AND (timing = 1)
+            AND (duration = 0)
+            AND (probability1 = 5)
+            AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~SPSD02~)
+            AND (effect_tail_valid = 1)
+          BEGIN
+            SET time_stop_count += 1
+          END
+
+          // Later Bard Song infrastructure must survive the semantic patch.
+          PATCH_IF (opcode = 326) AND (~%resource%~ STRING_EQUAL_CASE ~C0BSNGEF~) BEGIN
+            SET c0bsngef_count += 1
+          END
+        END
+
+        SET retained_contract_valid = 0
+        PATCH_IF
+          (skill_92 = 1) AND (skill_91 = 1) AND (skill_90 = 1)
+          AND (skill_275 = 1) AND (skill_59 = 1)
+          AND (skill_276 = 1) AND (skill_277 = 1)
+          AND (trap_detection_count = 1)
+          AND (blur_count = 1)
+          AND (party_ac_count = 1)
+          AND (nondetection_count = 1)
+          AND (singer_invisibility_count = 1)
+          AND (spell_state_40 = 1)
+          AND (spell_state_58 = 1)
+          AND (spell_state_31 = 1)
+          AND (portrait_icon_count = 1)
+          // The installed generated payload no longer carries the source-only
+          // opcode-321 self-removal effect.
+          AND (self_removal_count = 0)
+        BEGIN
+          SET retained_contract_valid = 1
+        END
+
+        PATCH_IF
+          (retained_contract_valid = 1)
+          AND (old_33 = 1) AND (old_34 = 1) AND (old_35 = 1)
+          AND (old_36 = 1) AND (old_37 = 1)
+          AND (new_33 = 0) AND (new_34 = 0) AND (new_35 = 0)
+          AND (new_36 = 0) AND (new_37 = 0)
+          AND (luck_count = 1) AND (damage_luck_count = 1)
+          AND (general_ac_count = 1) AND (missile_ac_count = 1)
+          AND (good_bonus_count = 2) AND (backstab_count = 1)
+          AND (random_invisibility_count = 1) AND (time_stop_count = 1)
+          AND (save_33_family = 1) AND (save_34_family = 1)
+          AND (save_35_family = 1) AND (save_36_family = 1)
+          AND (save_37_family = 1)
+          AND (luck_family = 1) AND (damage_luck_family = 1)
+          AND (good_bonus_family = 2) AND (backstab_family = 1)
+          AND (time_stop_family = 1)
+        BEGIN
+          SET state = 1
+        END ELSE PATCH_IF
+          (retained_contract_valid = 1)
+          AND (old_33 = 0) AND (old_34 = 0) AND (old_35 = 0)
+          AND (old_36 = 0) AND (old_37 = 0)
+          AND (new_33 = 1) AND (new_34 = 1) AND (new_35 = 1)
+          AND (new_36 = 1) AND (new_37 = 1)
+          AND (luck_count = 0) AND (damage_luck_count = 0)
+          AND (general_ac_count = 0) AND (missile_ac_count = 0)
+          AND (good_bonus_count = 0) AND (backstab_count = 0)
+          AND (random_invisibility_count = 0) AND (time_stop_count = 0)
+          AND (save_33_family = 1) AND (save_34_family = 1)
+          AND (save_35_family = 1) AND (save_36_family = 1)
+          AND (save_37_family = 1)
+          AND (luck_family = 0) AND (damage_luck_family = 0)
+          AND (good_bonus_family = 0) AND (backstab_family = 0)
+          AND (time_stop_family = 0)
+        BEGIN
+          SET state = 2
+        END
+      END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_HLA
+  RET
+    valid
+    c0bwhlab_count
+    description_strref
+BEGIN
+  SET valid = 0
+  SET c0bwhlab_count = 0
+  SET description_strref = "-1"
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 signature (8)
+    READ_LONG 0x50 description_strref
+    READ_LONG 0x64 ability_offset
+    READ_SHORT 0x68 ability_count
+    READ_LONG 0x6a effect_offset
+    READ_SHORT 0x70 global_effect_count
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
+      AND (ability_count > 0)
+      AND (global_effect_count = 0)
+      AND ((ability_offset + ability_count * 0x28) <= BUFFER_LENGTH)
+    BEGIN
+      SET song_change_count = 0
+      SET tables_valid = 1
+      FOR (header_index = 0; header_index < ability_count; ++header_index) BEGIN
+        SET header_offset = ability_offset + header_index * 0x28
+        READ_SHORT (header_offset + 0x1e) effect_count
+        READ_SHORT (header_offset + 0x20) first_effect
+        SET first_effect_offset = effect_offset + first_effect * 0x30
+        PATCH_IF ((first_effect_offset + effect_count * 0x30) > BUFFER_LENGTH) BEGIN
+          SET tables_valid = 0
+        END ELSE BEGIN
+          FOR (effect_index = 0; effect_index < effect_count; ++effect_index) BEGIN
+            SET current_effect = first_effect_offset + effect_index * 0x30
+            READ_SHORT current_effect opcode
+            READ_BYTE (current_effect + 0x02) target
+            READ_BYTE (current_effect + 0x03) power
+            READ_LONG (current_effect + 0x04) parameter1
+            READ_LONG (current_effect + 0x08) parameter2
+            READ_BYTE (current_effect + 0x0c) timing
+            READ_BYTE (current_effect + 0x0d) resist_dispel
+            READ_LONG (current_effect + 0x0e) duration
+            READ_BYTE (current_effect + 0x12) probability1
+            READ_BYTE (current_effect + 0x13) probability2
+            READ_ASCII (current_effect + 0x14) resource (8) NULL
+            READ_LONG (current_effect + 0x1c) dice_count
+            READ_LONG (current_effect + 0x20) dice_size
+            READ_LONG (current_effect + 0x24) save_type
+            READ_LONG (current_effect + 0x28) save_bonus
+            READ_LONG (current_effect + 0x2c) special
+            PATCH_IF
+              (opcode = 251)
+              AND (target = 2)
+              AND (power = 0)
+              AND (parameter1 = 0)
+              AND (parameter2 = 0)
+              AND (timing = 9)
+              AND (resist_dispel = 2)
+              AND (duration = 0)
+              AND (probability1 = 100)
+              AND (probability2 = 0)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0ABETS2~)
+              AND (dice_count = 0)
+              AND (dice_size = 0)
+              AND (save_type = 0)
+              AND (save_bonus = 0)
+              AND (special = 0)
+            BEGIN
+              SET song_change_count += 1
+            END
+            // Later HLA infrastructure must survive the description update.
+            PATCH_IF
+              (opcode = 309)
+              AND (target = 2)
+              AND (parameter1 = 1)
+              AND (timing = 1)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0BWHLAB~)
+            BEGIN
+              SET c0bwhlab_count += 1
+            END
+          END
+        END
+      END
+      PATCH_IF
+        (tables_valid = 1)
+        AND (song_change_count = 1)
+        AND (description_strref >= 0)
+      BEGIN
+        SET valid = 1
+      END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_INVISIBILITY_SPELL
+  INT_VAR
+    expected_projectile = 0
+  RET
+    valid
+BEGIN
+  SET valid = 0
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 signature (8)
+    READ_SHORT 0x1c spell_type
+    READ_LONG 0x64 ability_offset
+    READ_SHORT 0x68 ability_count
+    READ_LONG 0x6a effect_offset
+    READ_SHORT 0x70 global_effect_count
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
+      AND (spell_type = 5)
+      AND (ability_count = 1)
+      AND (global_effect_count = 0)
+      AND ((ability_offset + 0x28) <= BUFFER_LENGTH)
+    BEGIN
+      READ_BYTE (ability_offset + 0x0c) ability_target
+      READ_SHORT (ability_offset + 0x0e) ability_range
+      READ_SHORT (ability_offset + 0x1e) effect_count
+      READ_SHORT (ability_offset + 0x20) first_effect
+      READ_SHORT (ability_offset + 0x26) projectile
+      SET current_effect = effect_offset + first_effect * 0x30
+      PATCH_IF
+        (ability_target = 5)
+        AND (ability_range = 50)
+        AND (projectile = expected_projectile)
+        AND (effect_count = 1)
+        AND ((current_effect + 0x30) <= BUFFER_LENGTH)
+      BEGIN
+        READ_SHORT current_effect opcode
+        READ_BYTE (current_effect + 0x02) target
+        READ_BYTE (current_effect + 0x03) power
+        READ_LONG (current_effect + 0x04) parameter1
+        READ_LONG (current_effect + 0x08) parameter2
+        READ_BYTE (current_effect + 0x0c) timing
+        READ_BYTE (current_effect + 0x0d) resist_dispel
+        READ_LONG (current_effect + 0x0e) duration
+        READ_BYTE (current_effect + 0x12) probability1
+        READ_BYTE (current_effect + 0x13) probability2
+        READ_ASCII (current_effect + 0x14) resource (8) NULL
+        READ_LONG (current_effect + 0x1c) dice_count
+        READ_LONG (current_effect + 0x20) dice_size
+        READ_LONG (current_effect + 0x24) save_type
+        READ_LONG (current_effect + 0x28) save_bonus
+        READ_LONG (current_effect + 0x2c) special
+        PATCH_IF
+          (opcode = 20)
+          AND (target = 2)
+          AND (power = 0)
+          AND (parameter1 = 0)
+          AND (parameter2 = 0)
+          AND (timing = 0)
+          AND (resist_dispel = 0)
+          AND (duration = 6)
+          AND (probability1 = 100)
+          AND (probability2 = 0)
+          AND (~%resource%~ STRING_EQUAL_CASE ~~)
+          AND (dice_count = 0)
+          AND (dice_size = 0)
+          AND (save_type = 0)
+          AND (save_bonus = 0)
+          AND (special = 0)
+        BEGIN
+          SET valid = 1
+        END
+      END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_INVISIBILITY_TEMPLATE
+  RET
+    valid
+BEGIN
+  SET valid = 0
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 signature (8)
+    READ_SHORT 0x1c spell_type
+    READ_LONG 0x64 ability_offset
+    READ_SHORT 0x68 ability_count
+    READ_LONG 0x6a effect_offset
+    READ_SHORT 0x70 global_effect_count
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
+      AND (spell_type = 5)
+      AND (ability_count = 1)
+      AND (global_effect_count = 0)
+      AND ((ability_offset + 0x28) <= BUFFER_LENGTH)
+    BEGIN
+      READ_BYTE ability_offset ability_type
+      READ_BYTE (ability_offset + 0x01) ability_unknown
+      READ_SHORT (ability_offset + 0x02) ability_location
+      READ_ASCII (ability_offset + 0x04) ability_icon (8) NULL
+      READ_BYTE (ability_offset + 0x0c) ability_target
+      READ_BYTE (ability_offset + 0x0d) ability_target_count
+      READ_SHORT (ability_offset + 0x0e) ability_range
+      READ_SHORT (ability_offset + 0x10) ability_required_level
+      READ_SHORT (ability_offset + 0x12) ability_casting_time
+      READ_SHORT (ability_offset + 0x14) ability_times_per_day
+      READ_SHORT (ability_offset + 0x16) ability_dice_sides
+      READ_SHORT (ability_offset + 0x18) ability_dice_thrown
+      READ_SHORT (ability_offset + 0x1a) ability_enchanted
+      READ_SHORT (ability_offset + 0x1c) ability_damage_type
+      READ_SHORT (ability_offset + 0x1e) effect_count
+      READ_SHORT (ability_offset + 0x20) first_effect
+      READ_SHORT (ability_offset + 0x22) ability_charges
+      READ_SHORT (ability_offset + 0x24) ability_depletion
+      READ_SHORT (ability_offset + 0x26) ability_projectile
+      SET first_effect_offset = effect_offset + first_effect * 0x30
+      PATCH_IF
+        (ability_type = 1)
+        AND (ability_unknown = 0)
+        AND (ability_location = 4)
+        AND (~%ability_icon%~ STRING_EQUAL_CASE ~~)
+        AND (ability_target = 1)
+        AND (ability_target_count = 0)
+        AND (ability_range = 1)
+        AND (ability_required_level = 1)
+        AND (ability_casting_time = 0)
+        AND (ability_times_per_day = 0)
+        AND (ability_dice_sides = 0)
+        AND (ability_dice_thrown = 0)
+        AND (ability_enchanted = 0)
+        AND (ability_damage_type = 1)
+        AND (ability_charges = 1)
+        AND (ability_depletion = 1)
+        AND (ability_projectile = 1)
+        AND (effect_count = 2)
+        AND ((first_effect_offset + effect_count * 0x30) <= BUFFER_LENGTH)
+      BEGIN
+        SET display_count = 0
+        SET animation_count = 0
+        FOR (effect_index = 0; effect_index < effect_count; ++effect_index) BEGIN
+          SET current_effect = first_effect_offset + effect_index * 0x30
+          READ_SHORT current_effect opcode
+          READ_BYTE (current_effect + 0x02) target
+          READ_BYTE (current_effect + 0x03) power
+          READ_LONG (current_effect + 0x04) parameter1
+          READ_LONG (current_effect + 0x08) parameter2
+          READ_BYTE (current_effect + 0x0c) timing
+          READ_BYTE (current_effect + 0x0d) resist_dispel
+          READ_LONG (current_effect + 0x0e) duration
+          READ_BYTE (current_effect + 0x12) probability1
+          READ_BYTE (current_effect + 0x13) probability2
+          READ_ASCII (current_effect + 0x14) resource (8) NULL
+          READ_LONG (current_effect + 0x1c) dice_count
+          READ_LONG (current_effect + 0x20) dice_size
+          READ_LONG (current_effect + 0x24) save_type
+          READ_LONG (current_effect + 0x28) save_bonus
+          READ_LONG (current_effect + 0x2c) special
+          SET template_effect_valid = 0
+          PATCH_IF
+            (target = 1)
+            AND (power = 0)
+            AND (parameter1 = 0)
+            AND (parameter2 = 0)
+            AND (timing = 1)
+            AND (resist_dispel = 0)
+            AND (duration = 0)
+            AND (probability1 = 100)
+            AND (probability2 = 0)
+            AND (~%resource%~ STRING_EQUAL_CASE ~~)
+            AND (dice_count = 0)
+            AND (dice_size = 0)
+            AND (save_type = 0)
+            AND (save_bonus = 0)
+            AND (special = 0)
+          BEGIN
+            SET template_effect_valid = 1
+          END
+          PATCH_IF (template_effect_valid = 1) AND (opcode = 139) BEGIN
+            SET display_count += 1
+          END
+          PATCH_IF (template_effect_valid = 1) AND (opcode = 136) BEGIN
+            SET animation_count += 1
+          END
+        END
+        PATCH_IF (display_count = 1) AND (animation_count = 1) BEGIN
+          SET valid = 1
+        END
+      END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_HOOK_TEMPLATE
+  INT_VAR
+    expected_parameter1 = 0
+    expected_parameter2 = 0
+  STR_VAR
+    expected_resource = ~~
+  RET
+    valid
+BEGIN
+  SET valid = 0
+  LPF C0_VALIDATE_ABETTOR_EFF_RESERVED_FIELDS RET reserved_fields_valid = valid END
+  PATCH_IF (BUFFER_LENGTH >= 0x110) BEGIN
+    READ_ASCII 0 signature (8)
+    READ_ASCII 0x08 secondary_signature (8)
+    READ_LONG 0x10 opcode
+    READ_LONG 0x14 target
+    READ_LONG 0x18 power
+    READ_LONG 0x1c parameter1
+    READ_LONG 0x20 parameter2
+    READ_LONG 0x24 timing
+    READ_LONG 0x28 duration
+    READ_SHORT 0x2c probability1
+    READ_SHORT 0x2e probability2
+    READ_ASCII 0x30 resource (8) NULL
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
+      AND (~%secondary_signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
+      AND (opcode = 326)
+      AND (target = 1)
+      AND (power = 0)
+      AND (parameter1 = expected_parameter1)
+      AND (parameter2 = expected_parameter2)
+      AND (timing = 1)
+      AND (duration = 0)
+      AND (probability1 = 100)
+      AND (probability2 = 0)
+      AND (~%resource%~ STRING_EQUAL_CASE ~%expected_resource%~)
+      AND (reserved_fields_valid = 1)
+    BEGIN
+      SET valid = 1
+    END
+  END
+END
+
+ACTION_IF
+  !(FILE_EXISTS_IN_GAME ~C0ABETHL.SPL~)
+  OR !(FILE_EXISTS_IN_GAME ~C0ABETS2.SPL~)
+  OR !(FILE_EXISTS_IN_GAME ~C0ABETS2.EFF~)
+  OR !(FILE_EXISTS_IN_GAME ~C0SINGIN.SPL~)
+  OR !(FILE_EXISTS_IN_GAME ~C0SINGIN.EFF~)
+  OR !(FILE_EXISTS_IN_GAME ~C0SINGI2.EFF~)
+BEGIN
+  FAIL ~Required Abettor finite-song resources are missing; no changes were made.~
+END
+
+ACTION_IF
+  (FILE_EXISTS_IN_GAME ~C0ABIVI.SPL~)
+  OR (FILE_EXISTS_IN_GAME ~C0ABIVS.EFF~)
+  OR (FILE_EXISTS_IN_GAME ~C0ABIVE.EFF~)
+BEGIN
+  FAIL ~Reserved Abettor Invisibility resources already exist; no changes were made.~
+END
+
+OUTER_SET c0_abettor_pointer_valid = 0
+OUTER_TEXT_SPRINT c0_abettor_payload ~~
+COPY_EXISTING ~C0ABETS2.EFF~ ~override~
+  PATCH_IF (BUFFER_LENGTH >= 0x110) BEGIN
+    LPF C0_VALIDATE_ABETTOR_EFF_RESERVED_FIELDS RET reserved_fields_valid = valid END
+    READ_ASCII 0 signature (8)
+    READ_ASCII 0x08 secondary_signature (8)
+    READ_LONG 0x10 opcode
+    READ_LONG 0x14 target
+    READ_LONG 0x18 power
+    READ_LONG 0x1c parameter1
+    READ_LONG 0x20 parameter2
+    READ_LONG 0x24 timing
+    READ_LONG 0x28 duration
+    READ_SHORT 0x2c probability1
+    READ_SHORT 0x2e probability2
+    READ_ASCII 0x30 payload (8) NULL
+    SET payload_length = STRING_LENGTH ~%payload%~
+    SET payload_padding_valid = 1
+    FOR (payload_index = payload_length; payload_index < 8; ++payload_index) BEGIN
+      READ_BYTE (0x30 + payload_index) payload_padding_byte
+      PATCH_IF (payload_padding_byte != 0) BEGIN
+        SET payload_padding_valid = 0
+      END
+    END
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
+      AND (~%secondary_signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
+      AND (opcode = 146)
+      AND (target = 1)
+      AND (power = 0)
+      AND (parameter1 = 0)
+      AND (parameter2 = 1)
+      AND (timing = 1)
+      AND (duration = 0)
+      AND (probability1 = 100)
+      AND (probability2 = 0)
+      AND ((STRING_LENGTH ~%payload%~) > 0)
+      AND (~%payload%~ STRING_MATCHES_REGEXP ~^[A-Za-z0-9_#@-][A-Za-z0-9_#@-]*$~ = 0)
+      AND !(~%payload%~ STRING_EQUAL_CASE ~C0ABIVI~)
+      AND !(~%payload%~ STRING_EQUAL_CASE ~C0ABIVS~)
+      AND !(~%payload%~ STRING_EQUAL_CASE ~C0ABIVE~)
+      AND (payload_padding_valid = 1)
+      AND (reserved_fields_valid = 1)
+    BEGIN
+      INNER_ACTION BEGIN
+        OUTER_TEXT_SPRINT c0_abettor_payload ~%payload%~
+        OUTER_SET c0_abettor_pointer_valid = 1
+      END
+    END
+  END
+BUT_ONLY
+
+ACTION_IF
+  (c0_abettor_pointer_valid != 1)
+  OR !(FILE_EXISTS_IN_GAME ~%c0_abettor_payload%.SPL~)
+  OR !(FILE_EXISTS_IN_GAME ~%c0_abettor_payload%.EFF~)
+BEGIN
+  FAIL ~C0ABETS2.EFF did not contain a valid dynamic Symphony payload pointer; no changes were made.~
+END
+
+OUTER_SET c0_abettor_payload_eff_valid = 0
+COPY_EXISTING ~%c0_abettor_payload%.EFF~ ~override~
+  LPF C0_VALIDATE_ABETTOR_PAYLOAD_EFF
+    STR_VAR expected_resource = EVAL ~%c0_abettor_payload%~
+    RET payload_eff_valid = valid
+  END
+  PATCH_IF (payload_eff_valid = 1) BEGIN
+    INNER_ACTION BEGIN OUTER_SET c0_abettor_payload_eff_valid = 1 END
+  END
+BUT_ONLY
+
+ACTION_IF (c0_abettor_payload_eff_valid != 1) BEGIN
+  FAIL ~The dynamic Symphony payload EFF is malformed; no changes were made.~
+END
+
+OUTER_SET c0_abettor_payload_state = 0
+OUTER_SET c0_abettor_party_projectile = 0
+OUTER_SET c0_abettor_c0bsngef_before = 0
+COPY_EXISTING ~%c0_abettor_payload%.SPL~ ~override~
+  LPF C0_VALIDATE_ABETTOR_PAYLOAD
+    STR_VAR
+      expected_payload = EVAL ~%c0_abettor_payload%~
+    RET
+      payload_state = state
+      payload_projectile = party_projectile
+      payload_c0bsngef = c0bsngef_count
+  END
+  PATCH_IF (payload_state > 0) BEGIN
+    INNER_ACTION BEGIN
+      OUTER_SET c0_abettor_payload_state = payload_state
+      OUTER_SET c0_abettor_party_projectile = payload_projectile
+      OUTER_SET c0_abettor_c0bsngef_before = payload_c0bsngef
+    END
+  END
+BUT_ONLY
+
+OUTER_SET c0_abettor_controller_valid = 0
+COPY_EXISTING ~C0ABETS2.SPL~ ~override~
+  LPF C0_VALIDATE_ABETTOR_FINITE_CONTROLLER
+    INT_VAR
+      expected_start_hooks = 0
+      expected_end_hooks = 0
+    STR_VAR
+      expected_payload = EVAL ~%c0_abettor_payload%~
+    RET
+      controller_valid = valid
+  END
+  PATCH_IF (controller_valid = 1) BEGIN
+    INNER_ACTION BEGIN
+      OUTER_SET c0_abettor_controller_valid = 1
+    END
+  END
+BUT_ONLY
+
+OUTER_SET c0_abettor_spell_template_valid = 0
+COPY_EXISTING ~C0SINGIN.SPL~ ~override~
+  LPF C0_VALIDATE_ABETTOR_INVISIBILITY_TEMPLATE
+    RET
+      template_valid = valid
+  END
+  PATCH_IF (template_valid = 1) BEGIN
+    INNER_ACTION BEGIN
+      OUTER_SET c0_abettor_spell_template_valid = 1
+    END
+  END
+BUT_ONLY
+
+OUTER_SET c0_abettor_start_template_valid = 0
+COPY_EXISTING ~C0SINGIN.EFF~ ~override~
+  LPF C0_VALIDATE_ABETTOR_HOOK_TEMPLATE
+    INT_VAR
+      expected_parameter2 = 0
+    STR_VAR
+      expected_resource = ~C0SINGIN~
+    RET
+      template_valid = valid
+  END
+  PATCH_IF (template_valid = 1) BEGIN
+    INNER_ACTION BEGIN
+      OUTER_SET c0_abettor_start_template_valid = 1
+    END
+  END
+BUT_ONLY
+
+OUTER_SET c0_abettor_end_template_valid = 0
+COPY_EXISTING ~C0SINGI2.EFF~ ~override~
+  LPF C0_VALIDATE_ABETTOR_HOOK_TEMPLATE
+    INT_VAR
+      expected_parameter1 = (0 - 2146422739)
+      expected_parameter2 = 138
+    STR_VAR
+      expected_resource = ~C0SINGI2~
+    RET
+      template_valid = valid
+  END
+  PATCH_IF (template_valid = 1) BEGIN
+    INNER_ACTION BEGIN
+      OUTER_SET c0_abettor_end_template_valid = 1
+    END
+  END
+BUT_ONLY
+
+OUTER_SET c0_abettor_hla_valid = 0
+OUTER_SET c0_abettor_c0bwhlab_before = 0
+OUTER_SET c0_abettor_description_strref = "-1"
+COPY_EXISTING ~C0ABETHL.SPL~ ~override~
+  LPF C0_VALIDATE_ABETTOR_HLA
+    RET
+      hla_valid = valid
+      hla_c0bwhlab = c0bwhlab_count
+      hla_description_strref = description_strref
+  END
+  PATCH_IF (hla_valid = 1) BEGIN
+    INNER_ACTION BEGIN
+      OUTER_SET c0_abettor_hla_valid = 1
+      OUTER_SET c0_abettor_c0bwhlab_before = hla_c0bwhlab
+      OUTER_SET c0_abettor_description_strref = hla_description_strref
+    END
+  END
+BUT_ONLY
+
+ACTION_IF
+  (c0_abettor_payload_state = 0)
+  OR (c0_abettor_controller_valid != 1)
+  OR (c0_abettor_spell_template_valid != 1)
+  OR (c0_abettor_start_template_valid != 1)
+  OR (c0_abettor_end_template_valid != 1)
+  OR (c0_abettor_hla_valid != 1)
+  OR (c0_abettor_description_strref < 0)
+BEGIN
+  FAIL ~Installed Abettor resources do not match the recognized finite-song contract; no changes were made.~
+END
+
+ACTION_IF (c0_abettor_payload_state = 1) BEGIN
+  COPY_EXISTING ~%c0_abettor_payload%.SPL~ ~override~
+    LPF ALTER_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 33 match_target = 2 match_power = 0 match_parameter1 = 5 match_parameter2 = 0 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 parameter1 = 1 STR_VAR match_resource = ~~ END
+    LPF ALTER_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 34 match_target = 2 match_power = 0 match_parameter1 = 5 match_parameter2 = 0 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 parameter1 = 1 STR_VAR match_resource = ~~ END
+    LPF ALTER_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 35 match_target = 2 match_power = 0 match_parameter1 = 5 match_parameter2 = 0 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 parameter1 = 1 STR_VAR match_resource = ~~ END
+    LPF ALTER_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 36 match_target = 2 match_power = 0 match_parameter1 = 5 match_parameter2 = 0 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 parameter1 = 1 STR_VAR match_resource = ~~ END
+    LPF ALTER_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 37 match_target = 2 match_power = 0 match_parameter1 = 5 match_parameter2 = 0 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 parameter1 = 1 STR_VAR match_resource = ~~ END
+
+    LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 22 match_target = 1 match_power = 0 match_parameter1 = 6 match_parameter2 = 0 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 STR_VAR match_resource = ~~ END
+    LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 250 match_target = 1 match_power = 0 match_parameter1 = 6 match_parameter2 = 0 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 STR_VAR match_resource = ~~ END
+    LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 0 match_target = 1 match_power = 0 match_parameter1 = 4 match_parameter2 = 0 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 STR_VAR match_resource = ~~ END
+    LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 0 match_target = 1 match_power = 0 match_parameter1 = 4 match_parameter2 = 2 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 STR_VAR match_resource = ~~ END
+    LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 219 match_target = 1 match_power = 0 match_parameter1 = 1 match_parameter2 = 8 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 STR_VAR match_resource = ~~ END
+    LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 292 match_target = 1 match_power = 0 match_parameter1 = 0 match_parameter2 = 1 match_timing = 0 match_duration = 6 match_probability1 = 100 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 STR_VAR match_resource = ~~ END
+    LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 20 match_target = 1 match_power = 0 match_parameter1 = 0 match_parameter2 = 0 match_timing = 0 match_duration = 12 match_probability1 = 20 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 STR_VAR match_resource = ~~ END
+    LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 silent = 1 match_opcode = 146 match_target = 1 match_power = 0 match_parameter1 = 0 match_parameter2 = 1 match_timing = 1 match_duration = 0 match_probability1 = 5 match_probability2 = 0 match_resist_dispel = 0 match_dicenumber = 0 match_dicesize = 0 match_savingthrow = 0 match_savebonus = 0 match_special = 0 STR_VAR match_resource = SPSD02 END
+END
+
+COPY_EXISTING ~C0SINGIN.SPL~ ~override/C0ABIVI.SPL~
+  LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 match_opcode = 139 END
+  LPF DELETE_EFFECT INT_VAR check_headers = 1 check_globals = 0 match_opcode = 136 END
+  LPF ALTER_SPELL_HEADER INT_VAR target = 5 range = 50 projectile = c0_abettor_party_projectile END
+  LPF ADD_SPELL_EFFECT INT_VAR opcode = 20 target = 2 parameter1 = 0 parameter2 = 0 timing = 0 duration = 6 probability1 = 100 probability2 = 0 END
+
+COPY_EXISTING ~C0SINGIN.EFF~ ~override/C0ABIVS.EFF~
+  WRITE_ASCIIE 0x30 ~C0ABIVI~ (8)
+
+COPY_EXISTING ~C0SINGI2.EFF~ ~override/C0ABIVE.EFF~
+  WRITE_ASCIIE 0x30 ~C0ABIVI~ (8)
+
+OUTER_SET c0_abettor_post_start_eff_valid = 0
+COPY_EXISTING ~C0ABIVS.EFF~ ~override~
+  LPF C0_VALIDATE_ABETTOR_HOOK_TEMPLATE
+    INT_VAR expected_parameter2 = 0
+    STR_VAR expected_resource = ~C0ABIVI~
+    RET output_valid = valid
+  END
+  PATCH_IF (output_valid = 1) BEGIN
+    INNER_ACTION BEGIN OUTER_SET c0_abettor_post_start_eff_valid = 1 END
+  END
+BUT_ONLY
+
+OUTER_SET c0_abettor_post_end_eff_valid = 0
+COPY_EXISTING ~C0ABIVE.EFF~ ~override~
+  LPF C0_VALIDATE_ABETTOR_HOOK_TEMPLATE
+    INT_VAR
+      expected_parameter1 = (0 - 2146422739)
+      expected_parameter2 = 138
+    STR_VAR expected_resource = ~C0ABIVI~
+    RET output_valid = valid
+  END
+  PATCH_IF (output_valid = 1) BEGIN
+    INNER_ACTION BEGIN OUTER_SET c0_abettor_post_end_eff_valid = 1 END
+  END
+BUT_ONLY
+
+COPY_EXISTING ~C0ABETS2.SPL~ ~override~
+  LPF CLONE_EFFECT
+    INT_VAR
+      check_headers = 1
+      check_globals = 0
+      silent = 1
+      match_opcode = 177
+      match_target = 9
+      match_power = 0
+      match_parameter1 = 0
+      match_parameter2 = 2
+      match_timing = 1
+      match_duration = 0
+      match_probability1 = 100
+      match_probability2 = 0
+      match_resist_dispel = 0
+      match_dicenumber = 0
+      match_dicesize = 0
+      match_savingthrow = 0
+      match_savebonus = 0
+      match_special = 0
+    STR_VAR
+      match_resource = C0SINGIN
+      resource = C0ABIVS
+  END
+  LPF CLONE_EFFECT
+    INT_VAR
+      check_headers = 1
+      check_globals = 0
+      silent = 1
+      match_opcode = 272
+      match_target = 9
+      match_power = 0
+      match_parameter1 = 6
+      match_parameter2 = 3
+      match_timing = 10
+      match_probability1 = 100
+      match_probability2 = 0
+      match_resist_dispel = 0
+      match_dicenumber = 0
+      match_dicesize = 0
+      match_savingthrow = 0
+      match_savebonus = 0
+      match_special = 40
+    STR_VAR
+      match_resource = C0SINGI2
+      resource = C0ABIVE
+  END
+
+COPY_EXISTING ~C0ABETHL.SPL~ ~override~
+  SAY NAME1 ~Symphony of the Dark Children~
+  SAY NAME2 ~Symphony of the Dark Children~
+  SAY UNIDENTIFIED_DESC ~Symphony of the Dark Children
+The Abettor's song grants all affected party members +70% to all thieving skills, passive trap detection, Blur, a +3 bonus to Armor Class, a +1 bonus to all Saving Throws, and Non-Detection. The Abettor also gains Improved Invisibility for one round with each song pulse. All affected party members become invisible for one round when the song begins and for one round when the song ends. This is ordinary Invisibility and ends if the recipient attacks or casts a spell.
+
+This ability replaces the current Bard Song.~
+
+OUTER_SET c0_abettor_post_payload_state = 0
+OUTER_SET c0_abettor_c0bsngef_after = 0
+COPY_EXISTING ~%c0_abettor_payload%.SPL~ ~override~
+  LPF C0_VALIDATE_ABETTOR_PAYLOAD
+    STR_VAR
+      expected_payload = EVAL ~%c0_abettor_payload%~
+    RET
+      post_payload_state = state
+      post_payload_c0bsngef = c0bsngef_count
+  END
+  INNER_ACTION BEGIN
+    OUTER_SET c0_abettor_post_payload_state = post_payload_state
+    OUTER_SET c0_abettor_c0bsngef_after = post_payload_c0bsngef
+  END
+BUT_ONLY
+
+OUTER_SET c0_abettor_post_controller_valid = 0
+COPY_EXISTING ~C0ABETS2.SPL~ ~override~
+  LPF C0_VALIDATE_ABETTOR_FINITE_CONTROLLER
+    INT_VAR expected_start_hooks = 1 expected_end_hooks = 1
+    STR_VAR expected_payload = EVAL ~%c0_abettor_payload%~
+    RET post_controller_valid = valid
+  END
+  PATCH_IF (post_controller_valid = 1) BEGIN
+    INNER_ACTION BEGIN OUTER_SET c0_abettor_post_controller_valid = 1 END
+  END
+BUT_ONLY
+
+OUTER_SET c0_abettor_post_invisibility_valid = 0
+COPY_EXISTING ~C0ABIVI.SPL~ ~override~
+  LPF C0_VALIDATE_ABETTOR_INVISIBILITY_SPELL
+    INT_VAR expected_projectile = c0_abettor_party_projectile
+    RET post_invisibility_valid = valid
+  END
+  PATCH_IF (post_invisibility_valid = 1) BEGIN
+    INNER_ACTION BEGIN OUTER_SET c0_abettor_post_invisibility_valid = 1 END
+  END
+BUT_ONLY
+
+OUTER_SET c0_abettor_post_hla_valid = 0
+OUTER_SET c0_abettor_c0bwhlab_after = 0
+OUTER_SET c0_abettor_post_description_strref = "-1"
+COPY_EXISTING ~C0ABETHL.SPL~ ~override~
+  LPF C0_VALIDATE_ABETTOR_HLA
+    RET
+      post_hla_valid = valid
+      post_hla_c0bwhlab = c0bwhlab_count
+      post_hla_description_strref = description_strref
+  END
+  INNER_ACTION BEGIN
+    OUTER_SET c0_abettor_post_hla_valid = post_hla_valid
+    OUTER_SET c0_abettor_c0bwhlab_after = post_hla_c0bwhlab
+    OUTER_SET c0_abettor_post_description_strref = post_hla_description_strref
+  END
+BUT_ONLY
+
+ACTION_IF
+  (c0_abettor_post_payload_state != 2)
+  OR (c0_abettor_post_controller_valid != 1)
+  OR (c0_abettor_post_invisibility_valid != 1)
+  OR (c0_abettor_post_start_eff_valid != 1)
+  OR (c0_abettor_post_end_eff_valid != 1)
+  OR (c0_abettor_post_hla_valid != 1)
+  OR (c0_abettor_c0bsngef_before != c0_abettor_c0bsngef_after)
+  OR (c0_abettor_c0bwhlab_before != c0_abettor_c0bwhlab_after)
+  OR (c0_abettor_post_description_strref < 0)
+BEGIN
+  FAIL ~Abettor rebalance failed post-patch validation; WeiDU will roll back this component.~
+END
+
+PRINT ~Symphony of the Dark Children was rebalanced without changing earlier WeiDU components.~

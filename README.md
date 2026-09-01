@@ -16,6 +16,16 @@ A personal balance-patch fork of [Bardic Wonders](https://github.com/TheArtisanB
 > Artisan's Kitpack Favored Soul's global priest-delivery problem and does not
 > by itself rewrite Cleric, Druid, Paladin, or Ranger spellbooks.
 
+> [!NOTE]
+> **KNOWN ISSUE — SYMPHONY PARTY INVISIBILITY**
+>
+> Earlier live-install work supports accepting the broader Abettor kit for
+> release, but there is no surviving in-engine verification of the intended
+> one-round ordinary party Invisibility at the beginning and end of **Symphony
+> of the Dark Children**, and it may not trigger. The remaining song changes are
+> usable as released; the invisibility behavior is tracked separately in [issue
+> #5](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5).
+
 ## Credit & original author
 
 Bardic Wonders is designed and maintained by **Artemius_I**. If you enjoy the mod, please support him directly:
@@ -36,12 +46,21 @@ This fork exists strictly because I wanted a few balance knobs turned differentl
 | **Resonating Weapon** (HLA) | Stun 20%→10%, Save penalty -5→-2, Uses 16→8 | Party-wide stun-lock with cascading AoE was too dominant |
 | **Hymn of Requiem** (HLA) | Flat 60→6d10 damage/heal, Save vs. Spell for half | Flat unmitigated damage felt out of place; dice rolls add variance and counterplay |
 | **Song of Freedom** (HLA) | Removed 1-turn immunity, kept AoE cleanse | The AoE dispel is already a strong HLA; blanket immunity on top was redundant |
+| **Symphony of the Dark Children** (Abettor HLA) | Removed the +6 Luck/damage-luck, extra AC/vs.-Good, backstab-immunity, random-invisibility, and Time Stop package; reduced total save bonus from +5 to +1; intended one-round party Invisibility at song start/end | Keeps the core shadow-song identity without the unrelated singer-only power stack; start/end party Invisibility remains a [known issue](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5) |
 
 **Legionnaire's March** is on the list but still being evaluated.
 
 ## Installation
 
-Install [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) first, then install this patch over it. Standard WeiDU installation.
+For a fresh or future installation, use this fork as the Bardic Wonders mod and
+install both **Abettor of Mask Kit** (component `1004`) and **Bard Song Mechanics
+Tweak** (component `2004`). Symphony is exposed only after component `2004`
+validates and patches the finite-song controller.
+
+For an existing, already-stacked playthrough, do not reinstall older WeiDU
+components merely to pick up this change. Use the narrowly scoped tail component
+under [`live-patch/abettor-hla`](live-patch/abettor-hla) at the end of the current
+install order and follow its safety instructions.
 
 ### Deferred compatibility fixes
 

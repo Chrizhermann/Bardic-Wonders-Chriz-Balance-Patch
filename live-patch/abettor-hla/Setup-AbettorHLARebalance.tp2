@@ -1,0 +1,8 @@
+BACKUP ~weidu_external/backup/AbettorHLARebalance~
+AUTHOR ~ChrizFader~
+VERSION ~1.0.0~
+
+LANGUAGE ~English~ ~english~
+
+BEGIN ~Abettor of Mask: Symphony of the Dark Children finite-song rebalance~ DESIGNATED 0
+INCLUDE ~abettor-hla-rebalance/lib/patch.tpa~

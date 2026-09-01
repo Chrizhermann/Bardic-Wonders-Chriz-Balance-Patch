@@ -51,6 +51,6 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Upstream has ${behind} new commit(s)`,
-              body: `The original [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) repo has ${behind} new commit(s) since our last sync.\n\nRun \`git fetch upstream && git log --oneline HEAD..upstream/master\` to review changes.\n\nCheck if any changes affect the files we patched:\n- \`BardicWonders/new_spells/spl/C0BW502.SPL\`\n- \`BardicWonders/hlas/C0BWHL*.SPL\`\n- \`BardicWonders/lib/hlas.tpa\`\n- \`BardicWonders/lib/new_spells.tpa\``,
+              body: `The original [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) repo has ${behind} new commit(s) since our last sync.\n\nRun \`git fetch upstream && git log --oneline HEAD..upstream/master\` to review changes.\n\nCheck if any changes affect the files we patched:\n- \`BardicWonders/new_spells/spl/C0BW502.SPL\`\n- \`BardicWonders/hlas/C0BWHL*.SPL\`\n- \`BardicWonders/lib/hlas.tpa\`\n- \`BardicWonders/lib/new_spells.tpa\`\n- \`BardicWonders/abettor/c0abets2.spl\`\n- \`BardicWonders/lib/abettor.tpa\`\n- \`BardicWonders/lib/bardsongtweaks.tpa\`\n- \`BardicWonders/lib/abettor_hla_finite.tpa\``,
               labels: ['upstream-sync']
             });

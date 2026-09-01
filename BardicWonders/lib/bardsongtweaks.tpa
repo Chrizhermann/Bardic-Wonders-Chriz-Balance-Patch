@@ -136,6 +136,8 @@ COPY_EXISTING_REGEXP GLOB ~.*\.spl~ ~override~
     END
     BUT_ONLY
 
+INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
+
 ///////////////////////////////////////////////////////////////////////////
 // Update Kit Descriptions                                               //
 ///////////////////////////////////////////////////////////////////////////
@@ -210,4 +212,3 @@ COPY_EXISTING_REGEXP GLOB ~^.+\.bcs~ ~override~ //Parse through all dlg files
                 END
 
         BUT_ONLY
-        

@@ -1,5 +1,8 @@
 
 *.zip
+__pycache__/
+*.py[cod]
 
 # Internal Claude Code planning artifacts (not for release)
 docs/plans/
+docs/2026-07-15-abettor-hla-rebalance-handover.md

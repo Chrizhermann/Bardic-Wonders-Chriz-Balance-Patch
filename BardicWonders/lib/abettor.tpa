@@ -4,7 +4,6 @@ COPY_EXISTING ~LUBA0.2DA~ ~OVERRIDE/LUC0ABET.2DA~
 LPF patch_remove_hla STR_VAR remove_ability = ~AP_SPCL920~ END
 LPF patch_remove_hla STR_VAR remove_ability = ~GA_SPCL921~ END
 LPF patch_add_hla STR_VAR 2da_row = ~C0ABET1~ ability = ~AP_C0ABETT5~ num_allowed = 1 END	
-LPF patch_add_hla STR_VAR 2da_row = ~C0ABET2~ ability = ~AP_C0ABETHL~ num_allowed = 1 prerequisite = ~AP_C0ABETT5~ END	
 
 LAF ADD_KIT_EX
   INT_VAR
@@ -197,6 +196,6 @@ COPY ~%MOD_FOLDER%/abettor/c0abethl.spl~ ~override~
 SAY NAME1 ~Symphony of the Dark Children~
 SAY NAME2 ~Symphony of the Dark Children~
 SAY UNIDENTIFIED_DESC ~Symphony of the Dark Children
-This song is a powerful aid to both the Abettor and to <PRO_HISHER> allies. In addition to all existing effects, the song now provides +70% to all thieving skills, +6 to Luck, +4 to Armor Class (+8 vs. missile weapons) with an additional +2 vs. good-aligned creatures, +4 to all saving throws, immunity to backstab and a 20% chance for all party members to turn invisible for two rounds. The Abettor also has a 5% chance to stop time for one round, but <PRO_HESHE> is unable to take any action for the duration.
+The Abettor's song grants all affected party members +70% to all thieving skills, passive trap detection, Blur, a +3 bonus to Armor Class, a +1 bonus to all Saving Throws, and Non-Detection. The Abettor also gains Improved Invisibility for one round with each song pulse. All affected party members become invisible for one round when the song begins and for one round when the song ends. This is ordinary Invisibility and ends if the recipient attacks or casts a spell.
 
 This ability replaces the current Bard Song.~
