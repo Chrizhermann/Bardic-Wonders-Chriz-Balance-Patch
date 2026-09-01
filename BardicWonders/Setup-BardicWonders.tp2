@@ -1,5 +1,6 @@
 BACKUP ~weidu_external/backup/BardicWonders~
 AUTHOR ~The Artisan (artisans-corner.com)~
+VERSION ~v2.9c-balance.3~
 AUTO_TRA ~%MOD_FOLDER%/translations/%s~
 ALWAYS
   INCLUDE ~%MOD_FOLDER%/lib/a7#add_kit_ex.tpa~
