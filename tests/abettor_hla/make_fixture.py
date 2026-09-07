@@ -9,7 +9,7 @@ import re
 import shutil
 import sys
 
-from .ie_resources import read_eff_resource
+from .ie_resources import SYNTHETIC_KEY, read_controller_payload
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,11 +63,11 @@ def build_fixture(source: Path, destination: Path) -> dict[str, object]:
         raise RuntimeError(
             "reserved Abettor output already exists in source: " + ", ".join(collisions)
         )
-    pointer = require_file(source_override / "C0ABETS2.EFF")
-    payload_resref = read_eff_resource(pointer)
+    controller = require_file(source_override / "C0ABETS2.SPL")
+    payload_resref = read_controller_payload(controller)
     resource_names = (
         "C0ABETS2.SPL",
-        "C0ABETS2.EFF",
+        "PROJECTL.IDS",
         f"{payload_resref}.SPL",
         f"{payload_resref}.EFF",
         "C0ABETHL.SPL",
@@ -103,11 +103,15 @@ def build_fixture(source: Path, destination: Path) -> dict[str, object]:
         FIXTURE_SENTINEL_CONTENT,
         encoding="ascii",
     )
+    # An empty synthetic resource index enables WeiDU's real IDS lookup path.
+    # No original game's KEY or BIF data is copied.
+    (destination / "chitin.key").write_bytes(SYNTHETIC_KEY)
 
     fixture_inputs = (
         *(override / name for name in resource_names),
         destination / "dialog.tlk",
         destination / "WeiDU.log",
+        destination / "chitin.key",
     )
 
     manifest: dict[str, object] = {

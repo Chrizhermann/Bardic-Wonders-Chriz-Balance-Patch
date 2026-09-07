@@ -57,6 +57,12 @@ install both **Abettor of Mask Kit** (component `1004`) and **Bard Song Mechanic
 Tweak** (component `2004`). Symphony is exposed only after component `2004`
 validates and patches the finite-song controller.
 
+The unreleased compatibility fix corrects component `2004` rejecting its own
+generated controller in `v2.9c-balance.3`. It resolves the allocated payload and
+projectile instead of requiring a nonexistent `C0ABETS2.EFF`, while retaining
+finite-song validation. See the [reproduction and release requirements](docs/abettor-component-2004-compatibility.md).
+This installer fix does not establish in-game acceptance of issue #5.
+
 For an existing, already-stacked playthrough, do not reinstall older WeiDU
 components merely to pick up this change. Use the narrowly scoped tail component
 under [`live-patch/abettor-hla`](live-patch/abettor-hla) at the end of the current

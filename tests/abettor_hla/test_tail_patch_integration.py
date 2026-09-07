@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import unittest
 
-from .ie_resources import parse_spl, read_eff_resource
+from .ie_resources import SYNTHETIC_KEY, parse_spl, read_controller_payload
 from .test_patcher import effect_bytes, legacy_mutable_effects, spell_bytes
 from .test_weidu_finite_integration import controller_bytes
 
@@ -171,6 +171,8 @@ class TailPatchIntegrationTests(unittest.TestCase):
         controller_decoy_resource: str = "C0SINGIN",
         controller_decoy_end_duration: int | None = None,
         controller_decoy_end_resource: str = "C0SINGI2",
+        controller_projectile: int = 559,
+        registered_projectile: int = 558,
     ) -> None:
         override = root / "override"
         override.mkdir(parents=True)
@@ -183,6 +185,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
         (override / "C0ABETS2.SPL").write_bytes(
             controller_bytes(
                 payload_resource=payload_resref,
+                header_projectile=controller_projectile,
                 start_duration=controller_start_duration,
                 start_power=controller_start_power,
                 end_special=controller_end_special,
@@ -202,8 +205,10 @@ class TailPatchIntegrationTests(unittest.TestCase):
             (ROOT / "BardicWonders" / "bardsong" / "c0bardso.eff").read_bytes()
         )
         pointer[0x30:0x38] = payload_resref.encode("ascii").ljust(8, b"\0")
-        (override / "C0ABETS2.EFF").write_bytes(pointer)
         (override / f"{payload_resref}.EFF").write_bytes(pointer)
+        (override / "PROJECTL.IDS").write_text(
+            f"IDS V1.0\n{registered_projectile} C0BARDSO\n", encoding="ascii"
+        )
         (override / f"{payload_resref}.SPL").write_bytes(
             overpowered_payload(
                 first_skill_bonus=first_skill_bonus,
@@ -227,6 +232,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
             override / "C0SINGI2.EFF",
         )
         (root / "dialog.tlk").write_bytes(tlk_with_original_description())
+        (root / "chitin.key").write_bytes(SYNTHETIC_KEY)
         (root / "WeiDU.log").write_text(
             "// Log of Currently Installed WeiDU Mods\n"
             "~DUMMY/SETUP-DUMMY.TP2~ #0 #0 // Existing component\n",
@@ -240,7 +246,8 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 str(WEIDU),
                 "--no-auto-tp2",
                 "--noautoupdate",
-                "--nogame",
+                "--game",
+                str(root),
                 "--search",
                 "override",
                 "--tlkin",
@@ -267,7 +274,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
             override = root / "override"
             tracked = (
                 override / "C0ABETS2.SPL",
-                override / "C0ABETS2.EFF",
+                override / "PROJECTL.IDS",
                 override / f"{PAYLOAD_RESREF}.SPL",
                 override / "C0ABETHL.SPL",
                 override / "SHARED.SPL",
@@ -281,8 +288,9 @@ class TailPatchIntegrationTests(unittest.TestCase):
             self.assertEqual(0, install.returncode, install.stdout + install.stderr)
             self.assertEqual(
                 PAYLOAD_RESREF,
-                read_eff_resource(override / "C0ABETS2.EFF"),
+                read_controller_payload(override / "C0ABETS2.SPL"),
             )
+            self.assertFalse((override / "C0ABETS2.EFF").exists())
             payload = parse_spl(override / f"{PAYLOAD_RESREF}.SPL")
             for opcode in (33, 34, 35, 36, 37):
                 effects = payload.find_effects(opcode=opcode, target=2)
@@ -408,7 +416,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
             install = self.weidu(root, "install")
 
             self.assertNotEqual(0, install.returncode)
-            self.assertIn("recognized finite-song contract", install.stdout + install.stderr)
+            self.assertIn("valid dynamic Symphony payload reference", install.stdout + install.stderr)
             self.assertEqual(before, {path: sha256(path) for path in tracked})
             self.assertFalse((override / "C0ABIVI.SPL").exists())
             log = (root / "WeiDU.log").read_text(encoding="utf-8")
@@ -494,12 +502,12 @@ class TailPatchIntegrationTests(unittest.TestCase):
             log = (root / "WeiDU.log").read_text(encoding="utf-8")
             self.assertNotIn("SETUP-ABETTORHLAREBALANCE.TP2", log.upper())
 
-    def test_probabilistic_payload_pointer_is_refused_before_any_resource_write(self) -> None:
+    def test_probabilistic_active_payload_eff_is_refused_before_any_resource_write(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_fixture(root)
             override = root / "override"
-            pointer = override / "C0ABETS2.EFF"
+            pointer = override / f"{PAYLOAD_RESREF}.EFF"
             data = bytearray(pointer.read_bytes())
             struct.pack_into("<H", data, 0x2C, 50)
             pointer.write_bytes(data)
@@ -509,7 +517,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
             install = self.weidu(root, "install")
 
             self.assertNotEqual(0, install.returncode)
-            self.assertIn("dynamic Symphony payload pointer", install.stdout + install.stderr)
+            self.assertIn("dynamic Symphony payload EFF", install.stdout + install.stderr)
             self.assertEqual(before, {path: sha256(path) for path in tracked})
             self.assertFalse((override / "C0ABIVI.SPL").exists())
             log = (root / "WeiDU.log").read_text(encoding="utf-8")
@@ -716,7 +724,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
             self.assertEqual(before, {path: sha256(path) for path in tracked})
 
     def test_reserved_dynamic_payload_alias_is_refused_before_any_resource_write(self) -> None:
-        for payload_resref in ("C0ABIVI", "C0ABIVS", "C0ABIVE"):
+        for payload_resref in ("C0ABETS2", "C0SINGIN", "C0SINGI2", "C0ABIVI", "C0ABIVS", "C0ABIVE"):
             with self.subTest(payload_resref=payload_resref), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 self.make_fixture(root, payload_resref=payload_resref)
@@ -795,20 +803,19 @@ class TailPatchIntegrationTests(unittest.TestCase):
             self.assertNotEqual(0, install.returncode)
             self.assertEqual(before, {path: sha256(path) for path in tracked})
 
-    def test_malformed_pointer_padding_is_refused_before_any_resource_write(self) -> None:
+    def test_malformed_controller_payload_padding_is_refused_before_any_resource_write(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_fixture(root)
             override = root / "override"
-            pointer = override / "C0ABETS2.EFF"
-            data = bytearray(pointer.read_bytes())
-            data[0x30:0x38] = b"QXP\0BAD!"
-            pointer.write_bytes(data)
-            (override / "QXP.SPL").write_bytes(
-                (override / f"{PAYLOAD_RESREF}.SPL").read_bytes()
-            )
             controller = override / "C0ABETS2.SPL"
-            controller.write_bytes(controller_bytes(payload_resource="QXP"))
+            data = bytearray(controller.read_bytes())
+            ability_offset = struct.unpack_from("<I", data, 0x64)[0]
+            effect_offset = struct.unpack_from("<I", data, 0x6A)[0]
+            first_effect = struct.unpack_from("<H", data, ability_offset + 0x20)[0]
+            offset = effect_offset + (first_effect + 2) * 0x30 + 0x14
+            data[offset:offset + 8] = b"QXP\0BAD!"
+            controller.write_bytes(data)
             tracked = tuple(override.iterdir()) + (root / "dialog.tlk",)
             before = {path: sha256(path) for path in tracked}
 
@@ -817,12 +824,12 @@ class TailPatchIntegrationTests(unittest.TestCase):
             self.assertNotEqual(0, install.returncode)
             self.assertEqual(before, {path: sha256(path) for path in tracked})
 
-    def test_pointer_reserved_field_drift_is_refused_before_any_resource_write(self) -> None:
+    def test_active_payload_eff_reserved_field_drift_is_refused_before_any_resource_write(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_fixture(root)
             override = root / "override"
-            pointer = override / "C0ABETS2.EFF"
+            pointer = override / f"{PAYLOAD_RESREF}.EFF"
             data = bytearray(pointer.read_bytes())
             data[0x40] = 1
             pointer.write_bytes(data)
@@ -833,6 +840,140 @@ class TailPatchIntegrationTests(unittest.TestCase):
 
             self.assertNotEqual(0, install.returncode)
             self.assertEqual(before, {path: sha256(path) for path in tracked})
+
+    def test_registered_controller_projectile_is_resolved_for_each_install(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, registered_projectile=771, controller_projectile=772)
+
+            install = self.weidu(root, "install")
+
+            self.assertEqual(0, install.returncode, install.stdout + install.stderr)
+            self.assertEqual(
+                {772},
+                {ability.projectile for ability in parse_spl(root / "override" / "C0ABETS2.SPL").abilities},
+            )
+
+    def test_wrong_controller_projectile_is_refused_before_any_resource_write(self) -> None:
+        for projectile in (1, 558, 560):
+            with self.subTest(projectile=projectile), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root, controller_projectile=projectile)
+                tracked = tuple((root / "override").iterdir()) + (root / "dialog.tlk",)
+                before = {path: sha256(path) for path in tracked}
+
+                install = self.weidu(root, "install")
+
+                self.assertNotEqual(0, install.returncode)
+                self.assertEqual(before, {path: sha256(path) for path in tracked})
+
+    def test_missing_or_invalid_projectile_registration_is_refused_before_writes(self) -> None:
+        for ids_text in (None, "IDS V1.0\n558 OTHERPRO\n", "IDS V1.0\n65535 C0BARDSO\n"):
+            with self.subTest(ids_text=ids_text), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root)
+                ids = root / "override" / "PROJECTL.IDS"
+                if ids_text is None:
+                    ids.unlink()
+                else:
+                    ids.write_text(ids_text, encoding="ascii")
+                tracked = tuple((root / "override").iterdir()) + (root / "dialog.tlk",)
+                before = {path: sha256(path) for path in tracked}
+
+                install = self.weidu(root, "install")
+
+                self.assertNotEqual(0, install.returncode)
+                self.assertEqual(before, {path: sha256(path) for path in tracked})
+
+    def test_installed_feedback_strref_is_valid_but_reset_parameter_drift_is_not(self) -> None:
+        for opcode, parameter1, succeeds in ((139, 12345, True), (136, 1, False)):
+            with self.subTest(opcode=opcode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root)
+                template = root / "override" / "C0SINGIN.SPL"
+                data = bytearray(template.read_bytes())
+                ability_offset = struct.unpack_from("<I", data, 0x64)[0]
+                effect_offset = struct.unpack_from("<I", data, 0x6A)[0]
+                first = struct.unpack_from("<H", data, ability_offset + 0x20)[0]
+                count = struct.unpack_from("<H", data, ability_offset + 0x1E)[0]
+                matched = 0
+                for index in range(first, first + count):
+                    offset = effect_offset + index * 0x30
+                    if struct.unpack_from("<H", data, offset)[0] == opcode:
+                        struct.pack_into("<i", data, offset + 4, parameter1)
+                        matched += 1
+                self.assertEqual(1, matched)
+                template.write_bytes(data)
+                tracked = tuple((root / "override").iterdir()) + (root / "dialog.tlk",)
+                before = {path: sha256(path) for path in tracked}
+
+                install = self.weidu(root, "install")
+
+                if succeeds:
+                    self.assertEqual(0, install.returncode, install.stdout + install.stderr)
+                else:
+                    self.assertNotEqual(0, install.returncode)
+                    self.assertEqual(before, {path: sha256(path) for path in tracked})
+
+    def test_ambiguous_controller_payload_candidates_are_refused_before_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, controller_decoy_resource="OTHERPL")
+            controller = root / "override" / "C0ABETS2.SPL"
+            data = bytearray(controller.read_bytes())
+            effect_offset = struct.unpack_from("<I", data, 0x6A)[0]
+            for offset in range(effect_offset, len(data), 0x30):
+                if data[offset + 0x14:offset + 0x1C] == b"OTHERPL\0":
+                    data[offset + 0x0C] = 10
+                    struct.pack_into("<I", data, offset + 0x0E, 600)
+            controller.write_bytes(data)
+            tracked = tuple((root / "override").iterdir()) + (root / "dialog.tlk",)
+            before = {path: sha256(path) for path in tracked}
+
+            install = self.weidu(root, "install")
+
+            self.assertNotEqual(0, install.returncode)
+            self.assertIn("valid dynamic Symphony payload reference", install.stdout + install.stderr)
+            self.assertEqual(before, {path: sha256(path) for path in tracked})
+
+    def test_conflicting_controller_header_payloads_are_refused_before_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root)
+            controller = root / "override" / "C0ABETS2.SPL"
+            data = bytearray(controller.read_bytes())
+            ability_offset = struct.unpack_from("<I", data, 0x64)[0]
+            effect_offset = struct.unpack_from("<I", data, 0x6A)[0]
+            first_effect = struct.unpack_from("<H", data, ability_offset + 0x28 + 0x20)[0]
+            offset = effect_offset + (first_effect + 2) * 0x30 + 0x14
+            data[offset:offset + 8] = b"OTHERPL\0"
+            controller.write_bytes(data)
+            tracked = tuple((root / "override").iterdir()) + (root / "dialog.tlk",)
+            before = {path: sha256(path) for path in tracked}
+
+            install = self.weidu(root, "install")
+
+            self.assertNotEqual(0, install.returncode)
+            self.assertEqual(before, {path: sha256(path) for path in tracked})
+
+    def test_malformed_controller_table_offsets_are_refused_before_writes(self) -> None:
+        for field_offset in (0x64, 0x6A):
+            with self.subTest(field_offset=field_offset), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root)
+                controller = root / "override" / "C0ABETS2.SPL"
+                data = bytearray(controller.read_bytes())
+                struct.pack_into("<I", data, field_offset, 0x7FFFFFFF)
+                controller.write_bytes(data)
+                tracked = tuple((root / "override").iterdir()) + (root / "dialog.tlk",)
+                before = {path: sha256(path) for path in tracked}
+
+                install = self.weidu(root, "install")
+
+                self.assertNotEqual(0, install.returncode)
+                self.assertIn("valid dynamic Symphony payload reference", install.stdout + install.stderr)
+                self.assertNotIn("out of bounds", install.stdout + install.stderr)
+                self.assertEqual(before, {path: sha256(path) for path in tracked})
 
 
 if __name__ == "__main__":

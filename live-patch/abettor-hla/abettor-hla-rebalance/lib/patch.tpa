@@ -84,10 +84,87 @@ BEGIN
   END
 END
 
+DEFINE_PATCH_FUNCTION C0_RESOLVE_ABETTOR_PAYLOAD
+  RET valid payload
+BEGIN
+  SET valid = 0
+  SPRINT payload ~~
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 signature (8)
+    READ_LONG 0x64 ability_offset
+    READ_SHORT 0x68 ability_count
+    READ_LONG 0x6a effect_offset
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
+      AND (ability_count > 0)
+      AND (ability_offset >= 0x72)
+      AND (ability_offset <= BUFFER_LENGTH)
+      AND (ability_count <= ((BUFFER_LENGTH - ability_offset) / 0x28))
+      AND (effect_offset >= (ability_offset + ability_count * 0x28))
+      AND (effect_offset <= BUFFER_LENGTH)
+    BEGIN
+      SET matching_headers = 0
+      SET references_valid = 1
+      FOR (header_index = 0; header_index < ability_count; ++header_index) BEGIN
+        SET header_offset = ability_offset + header_index * 0x28
+        READ_SHORT (header_offset + 0x1e) effect_count
+        READ_SHORT (header_offset + 0x20) first_effect
+        SET candidate_count = 0
+        PATCH_IF ((first_effect + effect_count) <= ((BUFFER_LENGTH - effect_offset) / 0x30)) BEGIN
+          FOR (index = first_effect; index < first_effect + effect_count; ++index) BEGIN
+            SET offset = effect_offset + index * 0x30
+            READ_SHORT offset opcode
+            READ_BYTE (offset + 2) target
+            READ_BYTE (offset + 0x0c) timing
+            READ_LONG (offset + 0x0e) duration
+            PATCH_IF (opcode = 177) AND (target = 9) AND (timing = 10) AND (duration > 0) BEGIN
+              SET candidate_count += 1
+              READ_ASCII (offset + 0x14) candidate (8) NULL
+              SET candidate_length = STRING_LENGTH ~%candidate%~
+              SET padding_valid = 1
+              FOR (padding_index = candidate_length; padding_index < 8; ++padding_index) BEGIN
+                READ_BYTE (offset + 0x14 + padding_index) padding_byte
+                PATCH_IF (padding_byte != 0) BEGIN SET padding_valid = 0 END
+              END
+              PATCH_IF
+                (candidate_length > 0)
+                AND (~%candidate%~ STRING_MATCHES_REGEXP ~^[A-Za-z0-9_#@-][A-Za-z0-9_#@-]*$~ = 0)
+                AND (padding_valid = 1)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0ABETS2~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0SINGIN~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0SINGI2~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0ABIVI~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0ABIVS~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0ABIVE~)
+              BEGIN
+                PATCH_IF (~%payload%~ STRING_EQUAL ~~) BEGIN
+                  SPRINT payload ~%candidate%~
+                END ELSE PATCH_IF !(~%payload%~ STRING_EQUAL_CASE ~%candidate%~) BEGIN
+                  SET references_valid = 0
+                END
+              END ELSE BEGIN
+                SET references_valid = 0
+              END
+            END
+          END
+        END ELSE BEGIN
+          SET references_valid = 0
+        END
+        PATCH_IF (candidate_count = 1) BEGIN SET matching_headers += 1 END
+      END
+      PATCH_IF (references_valid = 1) AND (matching_headers = ability_count) BEGIN
+        SET valid = 1
+      END
+    END
+  END
+  PATCH_IF (valid = 0) BEGIN SPRINT payload ~~ END
+END
+
 DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_FINITE_CONTROLLER
   INT_VAR
     expected_start_hooks = 0
     expected_end_hooks = 0
+    expected_controller_projectile = 0
   STR_VAR
     expected_payload = ~~
   RET
@@ -110,10 +187,16 @@ BEGIN
       (~%signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
       AND (spell_type = 5)
       AND (ability_count > 0)
+      AND (expected_controller_projectile > 0)
+      AND (expected_controller_projectile <= 65535)
       // C0BARDSO contributes its two casting-level reset/start effects.
       AND (global_effect_count = 2)
-      AND ((ability_offset + ability_count * 0x28) <= BUFFER_LENGTH)
-      AND (global_effect_end <= BUFFER_LENGTH)
+      AND (ability_offset >= 0x72)
+      AND (ability_offset <= BUFFER_LENGTH)
+      AND (ability_count <= ((BUFFER_LENGTH - ability_offset) / 0x28))
+      AND (effect_offset >= (ability_offset + ability_count * 0x28))
+      AND (effect_offset <= BUFFER_LENGTH)
+      AND ((first_global_effect + global_effect_count) <= ((BUFFER_LENGTH - effect_offset) / 0x30))
     BEGIN
       SET global_effects_valid = 0
       SET global_reset = first_global_offset
@@ -227,7 +310,7 @@ BEGIN
           AND (ability_damage_type = 1)
           AND (ability_charges = 1)
           AND (ability_depletion = 1)
-          AND (ability_projectile = 1)
+          AND (ability_projectile = expected_controller_projectile)
           AND (header_effect_end <= BUFFER_LENGTH)
         BEGIN
           SET generic_start_count = 0
@@ -316,7 +399,7 @@ BEGIN
               AND (opcode = 146)
               AND (target = 9)
               AND (parameter1 = 0)
-              AND (parameter2 = 1)
+              AND (parameter2 = 0)
               AND (timing = 1)
               AND (duration = 0)
               AND (probability1 = 100)
@@ -1176,7 +1259,9 @@ BEGIN
           PATCH_IF
             (target = 1)
             AND (power = 0)
-            AND (parameter1 = 0)
+            // Only the feedback string is allocated at install time. The
+            // reset effect still requires parameter1=0; no timing is relaxed.
+            AND (((opcode = 139) AND (parameter1 >= 0)) OR ((opcode = 136) AND (parameter1 = 0)))
             AND (parameter2 = 0)
             AND (timing = 1)
             AND (resist_dispel = 0)
@@ -1254,7 +1339,6 @@ END
 ACTION_IF
   !(FILE_EXISTS_IN_GAME ~C0ABETHL.SPL~)
   OR !(FILE_EXISTS_IN_GAME ~C0ABETS2.SPL~)
-  OR !(FILE_EXISTS_IN_GAME ~C0ABETS2.EFF~)
   OR !(FILE_EXISTS_IN_GAME ~C0SINGIN.SPL~)
   OR !(FILE_EXISTS_IN_GAME ~C0SINGIN.EFF~)
   OR !(FILE_EXISTS_IN_GAME ~C0SINGI2.EFF~)
@@ -1270,55 +1354,24 @@ BEGIN
   FAIL ~Reserved Abettor Invisibility resources already exist; no changes were made.~
 END
 
+// Resolve the registered controller projectile; SPL headers store IDS value + 1.
+ACTION_IF !(FILE_EXISTS_IN_GAME ~PROJECTL.IDS~) BEGIN
+  FAIL ~PROJECTL.IDS is missing; cannot validate the Abettor finite-song projectile.~
+END
+OUTER_SET c0_abettor_controller_projectile = IDS_OF_SYMBOL (~PROJECTL~ ~C0BARDSO~)
+ACTION_IF (c0_abettor_controller_projectile < 0) OR (c0_abettor_controller_projectile >= 65535) BEGIN
+  FAIL ~C0BARDSO is not a valid registered projectile; no changes were made.~
+END
+OUTER_SET c0_abettor_controller_projectile += 1
+
 OUTER_SET c0_abettor_pointer_valid = 0
 OUTER_TEXT_SPRINT c0_abettor_payload ~~
-COPY_EXISTING ~C0ABETS2.EFF~ ~override~
-  PATCH_IF (BUFFER_LENGTH >= 0x110) BEGIN
-    LPF C0_VALIDATE_ABETTOR_EFF_RESERVED_FIELDS RET reserved_fields_valid = valid END
-    READ_ASCII 0 signature (8)
-    READ_ASCII 0x08 secondary_signature (8)
-    READ_LONG 0x10 opcode
-    READ_LONG 0x14 target
-    READ_LONG 0x18 power
-    READ_LONG 0x1c parameter1
-    READ_LONG 0x20 parameter2
-    READ_LONG 0x24 timing
-    READ_LONG 0x28 duration
-    READ_SHORT 0x2c probability1
-    READ_SHORT 0x2e probability2
-    READ_ASCII 0x30 payload (8) NULL
-    SET payload_length = STRING_LENGTH ~%payload%~
-    SET payload_padding_valid = 1
-    FOR (payload_index = payload_length; payload_index < 8; ++payload_index) BEGIN
-      READ_BYTE (0x30 + payload_index) payload_padding_byte
-      PATCH_IF (payload_padding_byte != 0) BEGIN
-        SET payload_padding_valid = 0
-      END
-    END
-    PATCH_IF
-      (~%signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
-      AND (~%secondary_signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
-      AND (opcode = 146)
-      AND (target = 1)
-      AND (power = 0)
-      AND (parameter1 = 0)
-      AND (parameter2 = 1)
-      AND (timing = 1)
-      AND (duration = 0)
-      AND (probability1 = 100)
-      AND (probability2 = 0)
-      AND ((STRING_LENGTH ~%payload%~) > 0)
-      AND (~%payload%~ STRING_MATCHES_REGEXP ~^[A-Za-z0-9_#@-][A-Za-z0-9_#@-]*$~ = 0)
-      AND !(~%payload%~ STRING_EQUAL_CASE ~C0ABIVI~)
-      AND !(~%payload%~ STRING_EQUAL_CASE ~C0ABIVS~)
-      AND !(~%payload%~ STRING_EQUAL_CASE ~C0ABIVE~)
-      AND (payload_padding_valid = 1)
-      AND (reserved_fields_valid = 1)
-    BEGIN
-      INNER_ACTION BEGIN
-        OUTER_TEXT_SPRINT c0_abettor_payload ~%payload%~
-        OUTER_SET c0_abettor_pointer_valid = 1
-      END
+COPY_EXISTING ~C0ABETS2.SPL~ ~override~
+  LPF C0_RESOLVE_ABETTOR_PAYLOAD RET resolved_valid = valid resolved_payload = payload END
+  PATCH_IF (resolved_valid = 1) BEGIN
+    INNER_ACTION BEGIN
+      OUTER_TEXT_SPRINT c0_abettor_payload ~%resolved_payload%~
+      OUTER_SET c0_abettor_pointer_valid = 1
     END
   END
 BUT_ONLY
@@ -1328,7 +1381,7 @@ ACTION_IF
   OR !(FILE_EXISTS_IN_GAME ~%c0_abettor_payload%.SPL~)
   OR !(FILE_EXISTS_IN_GAME ~%c0_abettor_payload%.EFF~)
 BEGIN
-  FAIL ~C0ABETS2.EFF did not contain a valid dynamic Symphony payload pointer; no changes were made.~
+  FAIL ~C0ABETS2.SPL did not contain a valid dynamic Symphony payload reference; no changes were made.~
 END
 
 OUTER_SET c0_abettor_payload_eff_valid = 0
@@ -1373,6 +1426,7 @@ COPY_EXISTING ~C0ABETS2.SPL~ ~override~
     INT_VAR
       expected_start_hooks = 0
       expected_end_hooks = 0
+      expected_controller_projectile = c0_abettor_controller_projectile
     STR_VAR
       expected_payload = EVAL ~%c0_abettor_payload%~
     RET
@@ -1597,6 +1651,7 @@ OUTER_SET c0_abettor_post_controller_valid = 0
 COPY_EXISTING ~C0ABETS2.SPL~ ~override~
   LPF C0_VALIDATE_ABETTOR_FINITE_CONTROLLER
     INT_VAR expected_start_hooks = 1 expected_end_hooks = 1
+      expected_controller_projectile = c0_abettor_controller_projectile
     STR_VAR expected_payload = EVAL ~%c0_abettor_payload%~
     RET post_controller_valid = valid
   END
