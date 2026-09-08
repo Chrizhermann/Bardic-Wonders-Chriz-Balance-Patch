@@ -1,6 +1,40 @@
 COPY ~%MOD_FOLDER%/Jester/2da~ ~override~
 COPY ~%MOD_FOLDER%/Jester/spells~ ~override~
 
+// CHRIZ BALANCE: Keep the base AC penalty; halve subsequent scaling.
+// ALTER_EFFECT uses negative parameter values as sentinels, so write AC directly.
+ACTION_FOR_EACH c0_jester_song IN SPCL751A C0JES03A BEGIN
+  COPY_EXISTING ~%c0_jester_song%.SPL~ ~override~
+    READ_LONG 0x64 c0_abilities
+    READ_SHORT 0x68 c0_ability_count
+    READ_LONG 0x6a c0_effects
+    FOR (c0_header = 0; c0_header < c0_ability_count; ++c0_header) BEGIN
+      READ_SHORT (c0_abilities + c0_header * 0x28 + 0x1e) c0_effect_count
+      READ_SHORT (c0_abilities + c0_header * 0x28 + 0x20) c0_first_effect
+      FOR (c0_index = 0; c0_index < c0_effect_count; ++c0_index) BEGIN
+        SET c0_effect = c0_effects + (c0_first_effect + c0_index) * 0x30
+        READ_SHORT c0_effect c0_opcode
+        READ_BYTE (c0_effect + 0x02) c0_target
+        PATCH_IF (c0_opcode = 0 AND c0_target = 2) BEGIN
+          READ_SLONG (c0_effect + 0x04) c0_ac
+          WRITE_LONG (c0_effect + 0x04) ("-2" + ((c0_ac + 2) / 2))
+        END
+      END
+    END
+END
+
+// Miscast percentages are halved and rounded down to whole percentages.
+COPY_EXISTING ~SPCL751A.SPL~ ~override~
+  LPF ALTER_EFFECT INT_VAR match_opcode = 60 match_parameter1 = 25 parameter1 = 12 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 60 match_parameter1 = 40 parameter1 = 20 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 60 match_parameter1 = 55 parameter1 = 27 END
+
+COPY_EXISTING ~C0JES03A.SPL~ ~override~
+  // General +5 plus missile-only +5 gives a total +10 against ranged attacks.
+  LPF ALTER_EFFECT INT_VAR match_opcode = 0 match_target = 1 parameter1 = 5 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 60 parameter1 = 35 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 362 parameter1 = 3 END
+
 COPY_EXISTING ~luabbr.2da~ ~override~
 	COUNT_2DA_COLS cols // amount of columns
 	READ_2DA_ENTRIES_NOW rows cols // read all file into memory  
@@ -20,16 +54,16 @@ STRING_SET_EVALUATE kit_strref ~JESTER: This Bard is well versed in the arts of 
 
 Advantages:
 – The Jester's Song, "Piercing Mockery", does not help allies. Instead, every opponent within 30 feet must save once per round to avoid falling under its effects:
- 1st level: Enemies receive a -2 penalty to Armor Class and a 25% chance to miscast their spells.
- 10th level: Enemies receive a -2 penalty to Armor Class, a 40% chance to miscast spells, and an increased critical miss modifier of 1.
- 15th level: Enemies receive a -4 penalty to Armor Class, a 55% chance to miscast spells, and an increased critical miss modifier of 1.
- 20th level: Enemies receive a -6 penalty to Armor Class, a 55% chance to miscast spells, and an increased critical miss modifier of 2.
+ 1st level: Enemies receive a -2 penalty to Armor Class and a 12% chance to miscast their spells.
+ 10th level: Enemies receive a -2 penalty to Armor Class, a 20% chance to miscast spells, and an increased critical miss modifier of 1.
+ 15th level: Enemies receive a -3 penalty to Armor Class, a 27% chance to miscast spells, and an increased critical miss modifier of 1.
+ 20th level: Enemies receive a -4 penalty to Armor Class, a 27% chance to miscast spells, and an increased critical miss modifier of 2.
  
 – May use Heckle once per level.
 
-HECKLE: The Jester uses every trick imaginable to taunt a single target, increasing their critical miss modifier by 4 and inflicting a 75% chance for spell failure for the next round. The target must also make a Saving vs. Breath (-1 to modifier per 6 levels) or go berserk for 3 rounds.
+HECKLE: The Jester uses every trick imaginable to taunt a single target, increasing their critical miss modifier by 3 and inflicting a 40% chance for spell failure for the next round. The target must also make a Save vs. Breath (-1 to modifier per 6 levels) or go berserk for 1 round. This ability can be blocked by spell protections.
 
-– 6th level May use Mad Ramble once per day. Gains an additional use at 10th and 14th level.
+– 11th level: May use Mad Ramble once per day. Gains an additional use at 15th and 19th level.
 
 MAD RAMBLE: The Jester forces all enemies within a 15-ft. radius to make a Save vs. Spell with a -4 penalty or become confused for 5 rounds + 1 round/6 levels, as per a Chaos spell. Unlike Chaos, this ability is not affected by Magic Resistance.
 
@@ -37,9 +71,16 @@ Disadvantages:
 – May not use regular Bard Song.~
 
 COPY_EXISTING ~C0JES01.SPL~ ~OVERRIDE~
+// Power 0 bypasses level-based spell protections. Use power 1 consistently,
+// including the refresh and portrait-icon effects, so protections block Heckle.
+  LPF ALTER_EFFECT INT_VAR power = 1 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 362 parameter1 = 3 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 60 parameter1 = 40 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 3 duration = 6 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 142 match_parameter2 = 4 duration = 6 END
 SAY NAME1 ~Heckle~
 SAY UNIDENTIFIED_DESC ~Heckle
-The Jester uses every trick imaginable to taunt a single target, increasing their critical miss modifier by 4 and inflicting a 75% chance for spell failure for the next round. The target must also make a Saving vs. Breath (-1 to modifier per 6 levels) or go berserk for 3 rounds.~
+The Jester uses every trick imaginable to taunt a single target, increasing their critical miss modifier by 3 and inflicting a 40% chance for spell failure for the next round. The target must also make a Save vs. Breath (-1 to modifier per 6 levels) or go berserk for 1 round. This ability can be blocked by spell protections.~
 
 COPY_EXISTING ~C0JES02.SPL~ ~OVERRIDE~
 SAY NAME1 ~Mad Ramble~
@@ -50,6 +91,6 @@ COPY_EXISTING ~C0JES03.SPL~ ~OVERRIDE~
 SAY NAME1 ~The Fool's Journey~
 SAY NAME2 ~The Fool's Journey~
 SAY UNIDENTIFIED_DESC ~The Fool's Journey
-This powerful song greatly enhances the Jester's influence over their foes. The Fool's Journey reduces all enemies' Armor Class by 10, induces a 70% chance to miscast spells, and an increased critical miss modifier of 5. Enemies are also unable to critically hit while under the effects. Additionally, while the Jester is singing, they gain a bonus of 10 to Armor Class, which is doubled against ranged attacks.
+This powerful song greatly enhances the Jester's influence over their foes. The Fool's Journey inflicts a -6 penalty to all enemies' Armor Class, induces a 35% chance to miscast spells, and increases their critical miss modifier by 3. Enemies are also unable to critically hit while under the effects. Additionally, while the Jester is singing, they gain a bonus of 5 to Armor Class, which is doubled to 10 against ranged attacks.
 
 This ability replaces the current Bard Song.~
