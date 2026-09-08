@@ -142,11 +142,22 @@ END
 	  parameter2 = c0cav02i
 END
 
+// CHRIZ BALANCE: Warsong of the Undying.
+// INAREAPA includes the singer. Use its shared +5 AC / +15% resistance package;
+// remove the redundant self-only defenses applied before the area's op321 refresh.
+COPY_EXISTING ~c0skd02a.spl~ ~override~
+  LPF DELETE_EFFECT INT_VAR match_opcode = 0 match_target = 1 END
+  FOR (opcode = 86; opcode <= 89; ++opcode) BEGIN
+    LPF DELETE_EFFECT INT_VAR match_opcode = opcode match_target = 1 END
+  END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 278 match_target = 2 parameter1 = 3 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 73 match_target = 2 parameter1 = 3 END
+
 COPY_EXISTING ~c0skd02.spl~ ~override~
 SAY NAME1 ~Warsong of the Undying~
 SAY NAME2 ~Warsong of the Undying~
 SAY UNIDENTIFIED_DESC ~Warsong of the Undying
-This is a powerful aid to both the Skald and to <PRO_HISHER> allies. The song gives the Skald <PRO_HIMHER>self a 10-point bonus to <PRO_HISHER> Armor Class and a 25% bonus to physical resistances. The song also gives <PRO_HISHER> allies a +5 bonus to hit and damage rolls, Armor Class, +15% to all resistances, immunity to fear, stun, and confusion, and Haste while the song is active.
+This is a powerful aid to both the Skald and to <PRO_HISHER> allies. The song gives the Skald <PRO_HIMHER>self a 5-point bonus to <PRO_HISHER> Armor Class and a 15% bonus to all resistances. The song also gives <PRO_HISHER> allies a +3 bonus to hit and damage rolls, a +5 bonus to Armor Class, +15% to all resistances, immunity to fear, stun, and confusion, and Haste while the song is active.
 
 This ability replaces the current Bard Song.~
 
