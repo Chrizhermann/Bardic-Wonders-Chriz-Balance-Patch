@@ -19,6 +19,8 @@ COPY_EXISTING ~C0BWHL2a.SPL~ ~OVERRIDE~
 	LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bwhl2r END
 COPY_EXISTING ~C0BWHL2b.SPL~ ~OVERRIDE~
 	LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bwhl2p END
+	// CHRIZ BALANCE: use the documented 2d6, rather than the bundled 6d2.
+	LPF ALTER_EFFECT INT_VAR match_opcode = 12 match_dicenumber = 6 match_dicesize = 2 dicenumber = 2 dicesize = 6 END
 
 COPY_EXISTING ~C0BWHL3.SPL~ ~OVERRIDE~
 SAY NAME1 ~Song of Freedom~
@@ -30,9 +32,11 @@ Removes effects of Song of Heroism and Legionnaire's March.
 This ability may be selected three times.~
 
 COPY_EXISTING ~C0BWHL4.SPL~ ~OVERRIDE~
+// CHRIZ BALANCE: bounded accuracy bonus instead of party-wide base THAC0 0.
+LPF ALTER_EFFECT INT_VAR match_opcode = 54 match_parameter1 = 0 match_parameter2 = 1 parameter1 = 4 parameter2 = 0 END
 SAY NAME1 ~Legionnaire's March~
 SAY UNIDENTIFIED_DESC ~Legionnaire's March
-Upon using this ability, the bard empowers all allies in a 25-ft. radius around them, setting their base THAC0 to 0 and base attacks per round to the equal of a fighter's of the same level, and +4 to damage for 1 turn.
+Upon using this ability, the bard empowers all allies in a 25-ft. radius around them, granting a +4 bonus to hit and damage and increasing non-warriors' attacks per round by a fighter's level-based bonus for 1 turn.
 
 Removes effects of Song of Freedom and Song of Heroism.
 
@@ -64,6 +68,10 @@ SAY UNIDENTIFIED_DESC ~Hymn of Requiem
 Upon using this ability, the bard deals 6d10 magic damage to enemies (Save vs. Spell for half) and heals 6d10 hit points to allies within a 25-ft. range of the bard. This song ignores all spell protections and magic resistance.
 
 This ability may be selected once.~
+
+COPY_EXISTING ~C0BWHL6B.SPL~ ~OVERRIDE~
+// EE opcode 12 bit 8 is save-for-half; bit 1 is reverse HP drain.
+LPF ALTER_EFFECT INT_VAR match_opcode = 12 match_special = 2 special = 256 END
 
 COPY_EXISTING ~C0BWHL7.SPL~ ~OVERRIDE~
 SAY NAME1 ~Prestissimo~

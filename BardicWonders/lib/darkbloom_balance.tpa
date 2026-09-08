@@ -1,0 +1,73 @@
+// CHRIZ BALANCE: Keep Darkbloom's control identity and its documented proc dice.
+// Fixed spell-slot imports and Spell Revisions compatibility are separate work.
+COPY_EXISTING ~C0BDD#1.SPL~ ~override~
+  // Dark Entanglement: the bundled poison was guaranteed and lasted 12 seconds.
+  LPF ALTER_EFFECT INT_VAR
+    match_opcode = 25
+    match_target = 2
+    match_parameter1 = 1
+    match_parameter2 = 2
+    match_timing = 0
+    match_duration = 12
+    match_probability1 = 100
+    match_probability2 = 0
+    probability1 = 10
+    duration = 5
+  END
+  // Keep the poison portrait icon on the same probability roll and lifetime.
+  LPF ALTER_EFFECT INT_VAR
+    match_opcode = 142
+    match_target = 2
+    match_parameter2 = 6
+    match_timing = 0
+    match_duration = 12
+    match_probability1 = 100
+    match_probability2 = 0
+    probability1 = 10
+    duration = 5
+  END
+  BUT_ONLY
+
+COPY_EXISTING ~C0BDD#BS.SPL~ ~override~
+  // Acid backstab: match the kit's stated 2d8 rather than the bundled 8d2.
+  LPF ALTER_EFFECT INT_VAR
+    match_opcode = 12
+    match_target = 2
+    match_parameter2 = 65536
+    match_dicenumber = 8
+    match_dicesize = 2
+    dicenumber = 2
+    dicesize = 8
+  END
+  BUT_ONLY
+
+COPY_EXISTING ~C0BDD#S2.SPL~ ~override~
+  // Subtract the normal song's maximum reduction instead of setting MR to zero.
+  // ALTER_EFFECT treats negative parameter1 values as "leave unchanged".
+  READ_LONG 0x64 c0_dark_abilities
+  READ_SHORT 0x68 c0_dark_ability_count
+  READ_LONG 0x6a c0_dark_effects
+  FOR (c0_dark_header = 0; c0_dark_header < c0_dark_ability_count; ++c0_dark_header) BEGIN
+    SET c0_dark_ability = c0_dark_abilities + 0x28 * c0_dark_header
+    READ_SHORT (c0_dark_ability + 0x1e) c0_dark_count
+    READ_SHORT (c0_dark_ability + 0x20) c0_dark_first
+    FOR (c0_dark_index = c0_dark_first; c0_dark_index < c0_dark_first + c0_dark_count; ++c0_dark_index) BEGIN
+      SET c0_dark_effect = c0_dark_effects + 0x30 * c0_dark_index
+      READ_SHORT c0_dark_effect c0_dark_opcode
+      READ_BYTE (c0_dark_effect + 0x02) c0_dark_target
+      READ_LONG (c0_dark_effect + 0x04) c0_dark_amount
+      READ_LONG (c0_dark_effect + 0x08) c0_dark_mode
+      PATCH_IF (c0_dark_opcode = 166 AND c0_dark_target = 2 AND c0_dark_amount = 0 AND c0_dark_mode = 1) BEGIN
+        WRITE_LONG (c0_dark_effect + 0x04) (0 - 50)
+        WRITE_LONG (c0_dark_effect + 0x08) 0
+      END
+    END
+  END
+  // Only modify an existing casting-level bonus; do not add divine spell access.
+  LPF ALTER_EFFECT INT_VAR
+    match_opcode = 191
+    match_target = 6
+    match_parameter1 = 6
+    parameter1 = 3
+  END
+  BUT_ONLY

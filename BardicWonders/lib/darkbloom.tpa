@@ -150,7 +150,7 @@ END
 COPY_EXISTING ~C0BDDHL.spl~ ~override~
 SAY NAME1 ~Millenia of Deathly Stillness~
 SAY UNIDENTIFIED_DESC ~Millenia of Deathly Stillness
-This is a powerful aid to both the Darkbloom Bard and to <PRO_HISHER> allies. This song gives the Darkbloom Bard <PRO_HIMHER>self regeneration for 10% of <PRO_HISHER> maximum hit points per round and increases <PRO_HISHER> allies' casting level by 6 and casting speed by 2. Enemies within range have their Magic Resistance and must make a Save vs. Spell at -6 or be Silenced.
+This is a powerful aid to both the Darkbloom Bard and to <PRO_HISHER> allies. This song gives the Darkbloom Bard <PRO_HIMHER>self regeneration for 10% of <PRO_HISHER> maximum hit points per round and increases <PRO_HISHER> allies' arcane casting level by 3 and casting speed by 2. Enemies within range have their Magic Resistance reduced by 50 percentage points and must make a Save vs. Spell at -6 or be Silenced.
 
 This ability replaces the current Bard Song.~
 
@@ -173,6 +173,9 @@ END
 SAY NAME1 ~Dark Entanglement~
 SAY UNIDENTIFIED_DESC ~Dark Entanglement
 By means of this spell, the caster is able to cause dark plants and roots in the area of effect to entangle creatures within the area for five rounds. An entangled creature can still attack but receives a -2 penalty to its Armor Class and -10% to Magic Resistance. There is 10% chance upon entanglement that the creature will be poisoned and suffer 1 damage per second for 5 seconds.~
+
+// Apply after the final bundled-resource copies and projectile rewrites.
+INCLUDE ~%MOD_FOLDER%/lib/darkbloom_balance.tpa~
 
 // Curse
 ACTION_IF FILE_EXISTS_IN_GAME ~SPPR112.SPL~ THEN BEGIN
