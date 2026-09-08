@@ -10,7 +10,7 @@ Requires: Prestissimo~
 COPY_EXISTING ~C0BWHL2.SPL~ ~OVERRIDE~
 SAY NAME1 ~Resonating Weapon~
 SAY UNIDENTIFIED_DESC ~Resonating Weapon
-The bard imbues the weapons of themselves and all allies with in a 20-ft. radius of them with the power of sound. For the next 5 rounds, all attacks made by affected allies cause all enemies within 10-ft. of the initial target to emanate a harmful wave of sound in a 5-ft. radius, dealing 2d6 magic damage and having a 10% chance to stun them for 1 round on a failed Saving Throw vs. Death at -2. Multiple sound waves that overlap may affect the same target, applying their effects consecutively.~
+The bard imbues the weapons of themselves and all allies within a 20-ft. radius of them with the power of sound. For the next 5 rounds, all attacks made by affected allies cause all enemies within 10-ft. of the initial target to emanate a harmful wave of sound in a 5-ft. radius, dealing 2d6 magic damage. Multiple sound waves that overlap may affect the same target, applying their damage consecutively.~
 
 ADD_PROJECTILE ~override/c0bwhl2r.PRO~ ~C0 Resonating Weapon AoE~
 ADD_PROJECTILE ~override/c0bwhl2p.PRO~ ~C0 Resonating Weapon Wave~
@@ -21,6 +21,9 @@ COPY_EXISTING ~C0BWHL2b.SPL~ ~OVERRIDE~
 	LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bwhl2p END
 	// CHRIZ BALANCE: use the documented 2d6, rather than the bundled 6d2.
 	LPF ALTER_EFFECT INT_VAR match_opcode = 12 match_dicenumber = 6 match_dicesize = 2 dicenumber = 2 dicesize = 6 END
+	// Cascading party damage is sufficient; remove the wave's stun and its icon.
+	LPF DELETE_EFFECT INT_VAR match_opcode = 45 END
+	LPF DELETE_EFFECT INT_VAR match_opcode = 142 match_parameter2 = 55 END
 
 COPY_EXISTING ~C0BWHL3.SPL~ ~OVERRIDE~
 SAY NAME1 ~Song of Freedom~
@@ -33,10 +36,12 @@ This ability may be selected three times.~
 
 COPY_EXISTING ~C0BWHL4.SPL~ ~OVERRIDE~
 // CHRIZ BALANCE: bounded accuracy bonus instead of party-wide base THAC0 0.
-LPF ALTER_EFFECT INT_VAR match_opcode = 54 match_parameter1 = 0 match_parameter2 = 1 parameter1 = 4 parameter2 = 0 END
+LPF ALTER_EFFECT INT_VAR match_opcode = 54 match_parameter1 = 0 match_parameter2 = 1 parameter1 = 3 parameter2 = 0 END
+// Shorten the bonuses and their warrior-APR exclusions together.
+LPF ALTER_EFFECT INT_VAR match_timing = 0 match_duration = 60 duration = 18 END
 SAY NAME1 ~Legionnaire's March~
 SAY UNIDENTIFIED_DESC ~Legionnaire's March
-Upon using this ability, the bard empowers all allies in a 25-ft. radius around them, granting a +4 bonus to hit and damage and increasing non-warriors' attacks per round by a fighter's level-based bonus for 1 turn.
+Upon using this ability, the bard empowers all allies in a 25-ft. radius around them, granting a +3 bonus to hit and a +4 bonus to damage and increasing non-warriors' attacks per round by a fighter's level-based bonus for 3 rounds.
 
 Removes effects of Song of Freedom and Song of Heroism.
 

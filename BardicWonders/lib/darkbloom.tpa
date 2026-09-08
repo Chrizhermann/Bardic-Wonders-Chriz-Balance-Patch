@@ -150,7 +150,7 @@ END
 COPY_EXISTING ~C0BDDHL.spl~ ~override~
 SAY NAME1 ~Millenia of Deathly Stillness~
 SAY UNIDENTIFIED_DESC ~Millenia of Deathly Stillness
-This is a powerful aid to both the Darkbloom Bard and to <PRO_HISHER> allies. This song gives the Darkbloom Bard <PRO_HIMHER>self regeneration for 10% of <PRO_HISHER> maximum hit points per round and increases <PRO_HISHER> allies' arcane casting level by 3 and casting speed by 2. Enemies within range have their Magic Resistance reduced by 50 percentage points and must make a Save vs. Spell at -6 or be Silenced.
+This is a powerful aid to both the Darkbloom Bard and to <PRO_HISHER> allies. This song gives the Darkbloom Bard <PRO_HIMHER>self regeneration for 10% of <PRO_HISHER> maximum hit points per round and increases <PRO_HISHER> allies' arcane casting level by 3 and casting speed by 1. Enemies within range have their Magic Resistance reduced by 50 percentage points and must make a Save vs. Spell at -6 or be Silenced.
 
 This ability replaces the current Bard Song.~
 

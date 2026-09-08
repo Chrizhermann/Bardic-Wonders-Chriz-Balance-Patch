@@ -1,6 +1,6 @@
 # Bardic Wonders — Balance Patch
 
-A personal balance-patch fork of [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) by **Artemius_I** (also known as **The Artisan** / **AionZ**), a fantastic mod that overhauls and expands the Bard class for BG:EE, BG2:EE, EET, and IWD:EE. All kit concepts, spell design, items, and creative direction are the original author's work; this fork only adjusts numbers for personal balance preferences while keeping the spirit of each ability intact.
+A personal balance-patch fork of [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) by **Artemius_I** (also known as **The Artisan** / **AionZ**), a fantastic mod that overhauls and expands the Bard class for BG:EE, BG2:EE, EET, and IWD:EE. All kit concepts, spell design, items, and creative direction are the original author's work; this fork adjusts balance and corrects related spell effects while keeping the spirit of each ability intact.
 
 > [!WARNING]
 > **SPELL REVISIONS COMPATIBILITY — PHASE 0**
@@ -43,9 +43,9 @@ This fork exists strictly because I wanted a few balance knobs turned differentl
 |---|---|---|
 | **Greater Heroism** (L5 spell) | HP +25%→+15%, THAC0 60%→85%, Saves +4→+2 | Too large a jump from L2 Heroism; stacked too well with other buffs |
 | **Song of Heroism** (HLA) | Temp HP +4/level→+20 flat, AC +6→+4, Saves +6→+4 | Scaling HP was excessive at high levels; combined with Greater Heroism it was overwhelming |
-| **Resonating Weapon** (HLA) | Stun 20%→10%, Save penalty -5→-2, Uses 16→8; corrected damage dice from 6d2 to the documented 2d6 | Party-wide stun-lock with cascading AoE was too dominant; the dice correction also lowers average wave damage from 9 to 7 |
+| **Resonating Weapon** (HLA) | Removed stun; retains five rounds of cascading 2d6 damage and the eight-selection limit; corrected bundled 6d2 dice | Repeated overlapping stun checks could lock down groups; cascading party damage is already a strong HLA |
 | **Hymn of Requiem** (HLA) | Flat 60→6d10 damage/heal, Save vs. Spell for half; corrected the damage flag that previously selected reverse HP drain | Flat unmitigated damage felt out of place; dice rolls add variance and counterplay |
-| **Legionnaire's March** (HLA) | Base THAC0 0→+4 to hit; retains +4 damage, non-warrior fighter APR progression, one-turn duration and three selections | Bounds the accuracy bonus instead of granting the whole party endgame fighter accuracy |
+| **Legionnaire's March** (HLA) | Base THAC0 0→+3 to hit; duration 1 turn→3 rounds; retains +4 damage, non-warrior fighter APR progression and three selections | Bounds the accuracy bonus instead of granting the whole party endgame fighter accuracy |
 | **Song of Freedom** (HLA) | Removed 1-turn immunity, kept AoE cleanse | The AoE dispel is already a strong HLA; blanket immunity on top was redundant |
 | **Warsong of the Undying** (Skald HLA) | Singer and allies gain +5 AC and +15% to all resistances; allies gain +3 to hit and damage. Haste and immunities unchanged. | Keeps the enhanced song's defensive benefits without increasing the level-20 song's attack and damage bonuses |
 | **Symphony of the Dark Children** (Abettor HLA) | Removed the +6 Luck/damage-luck, extra AC/vs.-Good, backstab-immunity, random-invisibility, and Time Stop package; reduced total save bonus from +5 to +1; intended one-round party Invisibility at song start/end | Keeps the core shadow-song identity without the unrelated singer-only power stack; start/end party Invisibility remains a [known issue](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5) |
@@ -54,9 +54,11 @@ This fork exists strictly because I wanted a few balance knobs turned differentl
 | **The Fool's Journey** (Jester HLA) | Enemy AC penalty -6, miscast 35%, critical miss modifier +3; singer AC bonus +5, +10 total against ranged attacks | Reduces the enhanced song's debuffs and personal defense; enemies still cannot critically hit |
 | **Heckle** (Jester) | Critical miss modifier +3, spell failure 40%, berserk for 1 round; blockable by level-based spell protections | Gives spell protections counterplay and reduces the taunt's strength and berserk duration |
 | **Mad Ramble** (Jester) | Daily uses gained at levels 11/15/19 | Delays access and subsequent uses |
-| **Thunderclap** (Storm Drummer) | Stun and deafness/miscast duration 1 turn→2 rounds; keeps save -4, 50% miscast and friendly fire | A level-10 ability should not disable an encounter for ten rounds |
-| **Millenia of Deathly Stillness** (Darkbloom HLA) | Enemy Magic Resistance set to 0→reduced by 50 percentage points; ally arcane caster-level bonus +6→+3 | Preserves the spell-support role without erasing arbitrary amounts of enemy Magic Resistance |
+| **Thunderclap** (Storm Drummer) | Stun 1 turn→1 round; deafness/miscast lasts 2 rounds at 25% spell failure; keeps save -4 and friendly fire | A level-10 ability should not disable an encounter for ten rounds |
+| **Millenia of Deathly Stillness** (Darkbloom HLA) | Enemy Magic Resistance set to 0→reduced by 50 percentage points; ally arcane caster-level bonus +6→+3 and casting-speed bonus +2→+1 | Preserves the spell-support role without erasing arbitrary amounts of enemy Magic Resistance |
 | **Dark Entanglement / acid backstab** (Darkbloom) | Poison chance 100%→10%, duration 12→5 seconds; acid damage 8d2→2d8 | Makes the resources match their existing descriptions |
+| **Die Aufklärung** (Kapellmeister HLA) | Casting speed +2→+1, singer MR +50%→+25%, spell saves +10→+5; correct singer/recipient refresh; retains +4 INT/caster levels | Reduces stacked support and defense while preventing overlapping pulses from duplicating bonuses |
+| **Checkmate** (Strategist) | Intelligence-based save penalty capped at -3; stun 1 round, Improved Haste 2 rounds | Limits the combination of strong area control and doubled party attack rate; retains the Intelligence condition and level-20 daily use |
 
 The [Bard balance audit](docs/bard-balance-audit.md) records the review scope,
 remaining candidates, and focused live-playtest checks. These changes have

@@ -146,6 +146,7 @@ class DarkbloomBalanceTests(unittest.TestCase):
             song = parse_spl(path)
             self.assertEqual([(-50, 0)], [(e.parameter1, e.parameter2) for e in song.find_effects(opcode=166)])
             self.assertEqual([(3, 0, 6)], [(e.parameter1, e.parameter2, e.target) for e in song.find_effects(opcode=191)])
+            self.assertEqual([(1, 0, 6)], [(e.parameter1, e.parameter2, e.target) for e in song.find_effects(opcode=189)])
             expected = bytearray((RESOURCES / path.name).read_bytes())
             for offset in effect_offsets(expected):
                 opcode = struct.unpack_from("<H", expected, offset)[0]
@@ -153,10 +154,12 @@ class DarkbloomBalanceTests(unittest.TestCase):
                     struct.pack_into("<ii", expected, offset + 4, -50, 0)
                 elif opcode == 191:
                     struct.pack_into("<i", expected, offset + 4, 3)
+                elif opcode == 189:
+                    struct.pack_into("<i", expected, offset + 4, 1)
             self.assertEqual(bytes(expected), path.read_bytes())
             hla = (root / "override" / "c0bddhl.spl").read_bytes()
             description = tlk_string(root / "dialog.tlk", struct.unpack_from("<I", hla, 0x50)[0])
-            for phrase in ("arcane casting level by 3", "casting speed by 2", "50 percentage points", "Save vs. Spell at -6", "replaces the current Bard Song"):
+            for phrase in ("arcane casting level by 3", "casting speed by 1", "50 percentage points", "Save vs. Spell at -6", "replaces the current Bard Song"):
                 self.assertIn(phrase, description)
             switch = parse_spl(root / "override" / "c0bddhl.spl").find_effects(opcode=251)
             self.assertEqual(["C0BDD#S2"], [e.resource for e in switch])

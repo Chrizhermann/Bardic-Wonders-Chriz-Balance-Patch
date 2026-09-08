@@ -190,6 +190,8 @@ Song of Universal Harmony may be selected up to five times.~
 
 COPY ~%MOD_FOLDER%/Kapellmeister/spells/C0KM#H4.spl~ ~override~
 SAY NAME1 ~Die Aufklärung~
-SAY UNIDENTIFIED_DESC ~This song is a powerful aid to the Kapellmeister and to any of their allied spellcasters. Die Aufklärung grants the Kapellmeister themselves a 10-point bonus to Saving Throws vs. Spells and a 50% bonus to Magic Resistance due to the power of the song. The song also gives the Kapellmeister's allies a +4 bonus to Intelligence and Arcane Casting Level, +2 bonus to Casting Speed, and two rolls for a 30% chance to restore an arcane spell of up to 8th level each round.
+SAY UNIDENTIFIED_DESC ~This song is a powerful aid to the Kapellmeister and to any of their allied spellcasters. Die Aufklärung grants the Kapellmeister themselves a 5-point bonus to Saving Throws vs. Spells and a 25% bonus to Magic Resistance due to the power of the song. The song also gives the Kapellmeister's allies a +4 bonus to Intelligence and Arcane Casting Level, a +1 bonus to Casting Speed, and a chance each round to restore expended arcane spells.
 
 This ability replaces the current Bard Song.~
+
+INCLUDE ~%MOD_FOLDER%/lib/kapellmeister_balance.tpa~

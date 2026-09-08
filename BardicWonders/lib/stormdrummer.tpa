@@ -58,7 +58,7 @@ STORM SHIELD: This spell lasts 1 round per level of the caster. It protects the 
 
 – From 10th level onwards, may use the Thunderclap ability once per day.
 
-THUNDERCLAP: The Storm Drummer claps <PRO_HISHER> hands together, causing a deafeningly loud blast of sound. All creatures around the Storm Drummer must save vs. spells at -4 or be stunned for two rounds. Even if the save is made successfully, all targets are deafened for two rounds, suffering a 50% chance to miscast any spells. Only the caster is immune to the spell's effects.
+THUNDERCLAP: The Storm Drummer claps <PRO_HISHER> hands together, causing a deafeningly loud blast of sound. All creatures around the Storm Drummer must save vs. spells at -4 or be stunned for one round. Even if the save is made successfully, all targets are deafened for two rounds, suffering a 25% chance to miscast any spells. Only the caster is immune to the spell's effects.
 
 DISADVANTAGES:
 – May not use any metal weapons.
@@ -190,13 +190,16 @@ SAY UNIDENTIFIED_DESC ~Storm Shield
 This spell lasts 1 round per level of the caster. It protects the caster completely from lightning, fire, cold, and normal missiles.~
 
 COPY ~%MOD_FOLDER%/storm/c0sdrum4.spl~ ~override~
-// CHRIZ BALANCE: Bound Thunderclap's stun and spell disruption to two rounds.
-// Match the six persistent effects, preserving the shorter casting visuals.
+// CHRIZ BALANCE: One round of stun and two rounds of 25% spell disruption.
 LPF ALTER_EFFECT INT_VAR match_duration = 60 duration = 12 END
+LPF ALTER_EFFECT INT_VAR match_opcode = 45 duration = 6 END
+LPF ALTER_EFFECT INT_VAR match_opcode = 141 match_parameter2 = 16 duration = 6 END
+LPF ALTER_EFFECT INT_VAR match_opcode = 142 match_parameter2 = 55 duration = 6 END
+LPF ALTER_EFFECT INT_VAR match_opcode = 60 match_parameter1 = 50 parameter1 = 25 END
 SAY NAME1 ~Thunderclap~
 SAY NAME2 ~Thunderclap~
 SAY UNIDENTIFIED_DESC ~Thunderclap
-The Storm Drummer claps <PRO_HISHER> hands together, causing a deafeningly loud blast of sound. All creatures around the Storm Drummer must save vs. spells at -4 or be stunned for two rounds. Even if the save is made successfully, all targets are deafened for two rounds, suffering a 50% chance to miscast any spells. Only the caster is immune to the spell's effects.~
+The Storm Drummer claps <PRO_HISHER> hands together, causing a deafeningly loud blast of sound. All creatures around the Storm Drummer must save vs. spells at -4 or be stunned for one round. Even if the save is made successfully, all targets are deafened for two rounds, suffering a 25% chance to miscast any spells. Only the caster is immune to the spell's effects.~
 
 COPY ~%MOD_FOLDER%/storm/c0sdruhl.spl~ ~override~
 SAY NAME1 ~Drums of Raijin~

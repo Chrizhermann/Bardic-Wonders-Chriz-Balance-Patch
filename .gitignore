@@ -2,6 +2,7 @@
 *.zip
 __pycache__/
 *.py[cod]
+chitem.log
 
 # Internal Claude Code planning artifacts (not for release)
 docs/plans/

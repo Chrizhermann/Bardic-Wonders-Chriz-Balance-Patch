@@ -80,7 +80,7 @@ class StormDrummerBalanceTests(unittest.TestCase):
             self.assertEqual(before_override, file_snapshot(override))
         self.assertEqual(original_sources, file_snapshot(STORM))
 
-    def test_installed_control_lasts_two_rounds_and_retains_counterplay(self) -> None:
+    def test_installed_stun_and_spell_failure_have_separate_durations(self) -> None:
         with self.installed() as root:
             output = root / "override" / "c0sdrum4.spl"
             spell = parse_spl(output)
@@ -91,7 +91,9 @@ class StormDrummerBalanceTests(unittest.TestCase):
                 effects = spell.find_effects(opcode=opcode)
                 self.assertTrue(effects)
                 for effect in effects:
-                    self.assertEqual((0, 12, 2, 1), (
+                    stun_visual = effect.opcode == 141 or (effect.opcode == 142 and effect.parameter2 == 55)
+                    duration = 6 if effect.opcode == 45 or stun_visual else 12
+                    self.assertEqual((0, duration, 2, 1), (
                         effect.timing, effect.duration, effect.target,
                         effect.resist_dispel,
                     ))
@@ -99,7 +101,7 @@ class StormDrummerBalanceTests(unittest.TestCase):
             self.assertEqual((1, -4), (stun.save_type, stun.save_bonus))
             miscast = spell.find_effects(opcode=60)
             self.assertEqual([0, 1], [effect.parameter2 for effect in miscast])
-            self.assertEqual([(50, 0), (50, 0)], [
+            self.assertEqual([(25, 0), (25, 0)], [
                 (effect.parameter1, effect.save_type) for effect in miscast
             ])
             self.assertEqual(3, spell.find_effects(opcode=269)[0].duration)
@@ -109,9 +111,9 @@ class StormDrummerBalanceTests(unittest.TestCase):
                 root / "dialog.tlk", struct.unpack_from("<I", data, 0x50)[0]
             )
             for phrase in (
-                "save vs. spells at -4 or be stunned for two rounds",
+                "save vs. spells at -4 or be stunned for one round",
                 "all targets are deafened for two rounds",
-                "50% chance to miscast any spells",
+                "25% chance to miscast any spells",
                 "Only the caster is immune",
             ):
                 self.assertIn(phrase, description)
@@ -126,17 +128,23 @@ class StormDrummerBalanceTests(unittest.TestCase):
             ]
             self.assertEqual([10], grants)
 
-    def test_only_six_durations_and_description_references_change(self) -> None:
+    def test_only_six_durations_two_miscast_values_and_text_references_change(self) -> None:
         with self.installed() as root:
             override = root / "override"
             output = (override / "c0sdrum4.spl").read_bytes()
             expected = bytearray((STORM / "c0sdrum4.spl").read_bytes())
             changes = 0
             for offset in effect_offsets(expected):
+                opcode = struct.unpack_from("<H", expected, offset)[0]
+                parameter2 = struct.unpack_from("<I", expected, offset + 8)[0]
                 duration = struct.unpack_from("<I", expected, offset + 0x0E)[0]
                 if duration == 60:
-                    struct.pack_into("<I", expected, offset + 0x0E, 12)
+                    stun_visual = opcode == 141 or (opcode == 142 and parameter2 == 55)
+                    duration = 6 if opcode == 45 or stun_visual else 12
+                    struct.pack_into("<I", expected, offset + 0x0E, duration)
                     changes += 1
+                if opcode == 60:
+                    struct.pack_into("<I", expected, offset + 4, 25)
             self.assertEqual(6, changes)
             for offset in (0x08, 0x0C, 0x50):
                 expected[offset : offset + 4] = output[offset : offset + 4]

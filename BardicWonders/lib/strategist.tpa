@@ -59,7 +59,7 @@ COUNTERATTACK GAMBIT: When the strategist falls below half of their maximum hit 
 
 – From 20th level onwards, may use the Checkmate ability once per day.
 
-CHECKMATE: The strategist changes the tides of battle with a spectacular tactical maneuver, forcing all enemies within their visual range to make a Saving Throw vs. Death (-1 modifier per point of the strategist's Intelligence above 16) or become Stunned for two rounds, while all of the strategist's allies gain the effects of Improved Haste for the same duration. Enemy creatures with Intelligence equal to or greater than the strategist are unaffected by the Stun effect.
+CHECKMATE: The strategist changes the tides of battle with a spectacular tactical maneuver, forcing all enemies within their visual range to make a Saving Throw vs. Death (-1 modifier per point of the strategist's Intelligence above 16, up to a maximum penalty of -3) or become Stunned for one round, while all of the strategist's allies gain the effects of Improved Haste for two rounds. Enemy creatures with Intelligence equal to or greater than the strategist are unaffected by the Stun effect.
 	
 Disadvantages:
 – Battle Tactics does not improve with level.
@@ -245,8 +245,17 @@ COPY_EXISTING ~C0STRA5A.SPL~ OVERRIDE
 COPY_EXISTING ~C0STRA6.SPL~ OVERRIDE
 SAY NAME1 ~Checkmate~
 SAY UNIDENTIFIED_DESC ~Checkmate
-The strategist changes the tides of battle with a spectacular tactical maneuver, forcing all enemies within their visual range to make a Saving Throw vs. Death (-1 modifier per point of the strategist's Intelligence above 16) or become Stunned for one round, while all of the strategist's allies gain the effects of Improved Haste for the same duration. Enemy creatures with Intelligence equal to or greater than the strategist are unaffected by the Stun effect.~
+The strategist changes the tides of battle with a spectacular tactical maneuver, forcing all enemies within their visual range to make a Saving Throw vs. Death (-1 modifier per point of the strategist's Intelligence above 16, up to a maximum penalty of -3) or become Stunned for one round, while all of the strategist's allies gain the effects of Improved Haste for two rounds. Enemy creatures with Intelligence equal to or greater than the strategist are unaffected by the Stun effect.~
 LPF ALTER_EFFECT INT_VAR match_opcode = 326 match_parameter2 = 0 parameter2 = C0HTINT END
+// CHRIZ BALANCE: timing 10 is measured in ticks (15 per second).
+// Keep the haste exclusions on the same two-round lifetime as Improved Haste.
+LPF ALTER_EFFECT INT_VAR match_opcode = 16 match_timing = 10 match_duration = 200 duration = 180 END
+LPF ALTER_EFFECT INT_VAR match_opcode = 206 match_timing = 10 match_duration = 200 duration = 180 END
+
+// Patch the shared payload before generating every Intelligence variant.
+COPY_EXISTING ~C0STRA6A.SPL~ ~override~
+LPF ALTER_EFFECT INT_VAR match_opcode = 45 match_timing = 10 match_duration = 200 duration = 90 END
+LPF ALTER_EFFECT INT_VAR match_opcode = 142 match_parameter2 = 55 match_timing = 10 match_duration = 200 duration = 90 END
 
 COPY_EXISTING ~C0STRA6A.SPL~ ~OVERRIDE/C0STRA6B.SPL~
 LPF ALTER_EFFECT INT_VAR match_opcode = 324 parameter1 = 17 STR_VAR resource = C0STRA6B END
@@ -259,22 +268,22 @@ LPF ALTER_EFFECT INT_VAR match_opcode = 324 parameter1 = 19 STR_VAR resource = C
 LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 3) END
 COPY_EXISTING ~C0STRA6A.SPL~ ~OVERRIDE/C0STRA6E.SPL~
 LPF ALTER_EFFECT INT_VAR match_opcode = 324 parameter1 = 20 STR_VAR resource = C0STRA6E END
-LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 4) END
+LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 3) END
 COPY_EXISTING ~C0STRA6A.SPL~ ~OVERRIDE/C0STRA6F.SPL~
 LPF ALTER_EFFECT INT_VAR match_opcode = 324 parameter1 = 21 STR_VAR resource = C0STRA6F END
-LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 5) END
+LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 3) END
 COPY_EXISTING ~C0STRA6A.SPL~ ~OVERRIDE/C0STRA6G.SPL~
 LPF ALTER_EFFECT INT_VAR match_opcode = 324 parameter1 = 22 STR_VAR resource = C0STRA6G END
-LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 6) END
+LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 3) END
 COPY_EXISTING ~C0STRA6A.SPL~ ~OVERRIDE/C0STRA6H.SPL~
 LPF ALTER_EFFECT INT_VAR match_opcode = 324 parameter1 = 23 STR_VAR resource = C0STRA6H END
-LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 7) END
+LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 3) END
 COPY_EXISTING ~C0STRA6A.SPL~ ~OVERRIDE/C0STRA6I.SPL~
 LPF ALTER_EFFECT INT_VAR match_opcode = 324 parameter1 = 24 STR_VAR resource = C0STRA6I END
-LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 8) END
+LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 3) END
 COPY_EXISTING ~C0STRA6A.SPL~ ~OVERRIDE/C0STRA6J.SPL~
 LPF ALTER_EFFECT INT_VAR match_opcode = 324 parameter1 = 25 STR_VAR resource = C0STRA6J END
-LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 9) END
+LPF ALTER_EFFECT INT_VAR match_savebonus = 0 savebonus = (0 - 3) END
 
 COPY_EXISTING ~C0STRH1.SPL~ OVERRIDE
 SAY NAME1 ~Peerless Strategy~

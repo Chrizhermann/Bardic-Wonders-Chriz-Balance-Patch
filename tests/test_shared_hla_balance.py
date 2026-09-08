@@ -81,18 +81,29 @@ class SharedHlaBalanceTests(unittest.TestCase):
     def test_legionnaire_uses_additive_accuracy_and_preserves_other_effects(self) -> None:
         actual = self.override / "c0bwhl4.spl"
         effect, = parse_spl(actual).find_effects(opcode=54)
-        self.assertEqual((4, 0, 60, 2),
+        self.assertEqual((3, 0, 18, 2),
                          (effect.parameter1, effect.parameter2, effect.duration, effect.target))
         expected = bytearray((SOURCE / actual.name).read_bytes())
         output = actual.read_bytes()
         for offset in (0x08, 0x50):
             expected[offset:offset + 4] = output[offset:offset + 4]
+        shortened = 0
         for offset in effect_offsets(expected):
             if struct.unpack_from("<H", expected, offset)[0] == 54:
-                struct.pack_into("<ii", expected, offset + 4, 4, 0)
+                struct.pack_into("<ii", expected, offset + 4, 3, 0)
+            if expected[offset + 0x0C] == 0 and struct.unpack_from("<I", expected, offset + 0x0E)[0] == 60:
+                struct.pack_into("<I", expected, offset + 0x0E, 18)
+                shortened += 1
+        self.assertEqual(13, shortened)
         self.assertEqual(bytes(expected), output)
         text = self.description(actual.name)
-        self.assertIn("a +4 bonus to hit and damage", text)
+        self.assertIn("a +3 bonus to hit and a +4 bonus to damage", text)
+        self.assertIn("for 3 rounds", text)
+        # Opcode 177 inherits timing/duration into its decoded EFF. Its
+        # warrior-only APR cancellation must expire with the positive APR.
+        self.assertEqual({18}, {e.duration for e in parse_spl(actual).find_effects(opcode=177)})
+        self.assertEqual((SOURCE / "c0bwhl4a.eff").read_bytes(),
+                         (self.override / "c0bwhl4a.eff").read_bytes())
         self.assertIn("This ability may be selected three times.", text)
 
     def test_hymn_halves_on_save_without_reverse_hp_drain(self) -> None:
@@ -109,7 +120,7 @@ class SharedHlaBalanceTests(unittest.TestCase):
                          (self.override / "c0bwhl6a.spl").read_bytes())
         self.assertIn("Save vs. Spell for half", self.description("c0bwhl6.spl"))
 
-    def test_resonating_uses_two_six_sided_dice_and_preserves_stun(self) -> None:
+    def test_resonating_retains_damage_and_delivery_without_stun_or_its_icon(self) -> None:
         actual = self.override / "c0bwhl2b.spl"
         spell = parse_spl(actual)
         effect, = spell.find_effects(opcode=12)
@@ -119,13 +130,26 @@ class SharedHlaBalanceTests(unittest.TestCase):
         ability = struct.unpack_from("<I", expected, 0x64)[0]
         # The real ADD_PROJECTILE assigns an install-local identifier.
         expected[ability + 0x26:ability + 0x28] = output[ability + 0x26:ability + 0x28]
+        removals = []
         for offset in effect_offsets(expected):
-            if struct.unpack_from("<H", expected, offset)[0] == 12:
+            opcode = struct.unpack_from("<H", expected, offset)[0]
+            if opcode == 12:
                 struct.pack_into("<II", expected, offset + 0x1C, 2, 6)
+            elif opcode == 45 or (opcode == 142 and struct.unpack_from("<I", expected, offset + 8)[0] == 55):
+                removals.append(offset)
+        self.assertEqual(2, len(removals))
+        self.assertEqual(1, struct.unpack_from("<H", expected, 0x68)[0])
+        count = struct.unpack_from("<H", expected, ability + 0x1E)[0]
+        struct.pack_into("<H", expected, ability + 0x1E, count - 2)
+        for offset in reversed(removals):
+            del expected[offset:offset + 0x30]
         self.assertEqual(bytes(expected), output)
-        stun, = spell.find_effects(opcode=45)
-        self.assertEqual((10, 6, 4, -2),
-                         (stun.probability1, stun.duration, stun.save_type, stun.save_bonus))
+        self.assertEqual((), spell.find_effects(opcode=45))
+        self.assertEqual((), spell.find_effects(opcode=142, parameter2=55))
+        description = self.description("c0bwhl2.spl")
+        self.assertNotIn("stun", description.lower())
+        self.assertIn("dealing 2d6 magic damage", description)
+        self.assertIn("next 5 rounds", description)
         self.assertEqual((SOURCE / "c0bwhl2.spl").read_bytes()[0x72:],
                          (self.override / "c0bwhl2.spl").read_bytes()[0x72:])
 

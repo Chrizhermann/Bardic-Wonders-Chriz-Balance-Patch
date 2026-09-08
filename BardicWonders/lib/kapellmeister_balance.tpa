@@ -1,0 +1,44 @@
+// Keep singer and recipient bonuses under separate source resources. A caster-
+// targeted refresh in the area song must not remove its singer's recipient
+// bonuses again when the projectile processes the next ally.
+ACTION_IF FILE_EXISTS_IN_GAME ~C0KMHAF.SPL~ OR
+          FILE_EXISTS_IN_GAME ~C0KMHAF.EFF~ OR
+          FILE_EXISTS_IN_GAME ~C0KMHAF.ITM~ BEGIN
+  FAIL ~Kapellmeister balance helper C0KMHAF is already owned by another resource.~
+END
+
+COPY_EXISTING ~C0KM#SOH.SPL~ ~override/C0KMHAF.SPL~
+  // Retain Bard Song type for duration modifiers. Without the song portrait
+  // icon (removed below), component 2004 does not transform this helper.
+  LPF ALTER_SPELL_HEADER INT_VAR target = 7 range = 0 projectile = 1 END
+  // Force-visible belongs to the singer's casting slice, not each recipient.
+  LPF DELETE_EFFECT INT_VAR check_headers = 0 check_globals = 1 match_opcode = 136 END
+  PATCH_FOR_EACH c0_km_opcode IN 321 142 328 318 166 37 146 BEGIN
+    LPF DELETE_EFFECT INT_VAR match_opcode = c0_km_opcode END
+  END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 189 match_parameter1 = 2 parameter1 = 1 END
+  LPF ADD_SPELL_EFFECT
+    INT_VAR opcode = 321 target = 2 timing = 1 resist_dispel = 2 insert_point = 0
+    STR_VAR resource = ~C0KMHAF~
+  END
+
+COPY_EXISTING ~C0KM#SOH.SPL~ ~override~
+  PATCH_FOR_EACH c0_km_opcode IN 19 191 189 BEGIN
+    LPF DELETE_EFFECT INT_VAR match_opcode = c0_km_opcode match_target = 2 END
+  END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 166 match_target = 1 match_parameter1 = 50 parameter1 = 25 END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 37 match_target = 1 match_parameter1 = 10 parameter1 = 5 END
+  // The bundled deafness guard mistakenly names the Jester's ordinary song.
+  LPF ALTER_EFFECT INT_VAR match_opcode = 318
+    STR_VAR match_resource = ~SPCL751A~ resource = ~C0KM#SOH~
+  END
+  LPF ADD_SPELL_EFFECT
+    INT_VAR opcode = 146 target = 2 parameter2 = 1 timing = 1 insert_point = 8
+    STR_VAR resource = ~C0KMHAF~
+  END
+  // component 2004 rewrites this exact self-reference to the generated payload
+  // name. The controller retains the original name and continues pulsing.
+  LPF ADD_SPELL_EFFECT
+    INT_VAR opcode = 321 target = 1 timing = 1 resist_dispel = 2 insert_point = 0
+    STR_VAR resource = ~C0KM#SOH~
+  END
