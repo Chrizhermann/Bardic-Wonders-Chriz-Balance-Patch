@@ -1,0 +1,50 @@
+// CHRIZ BALANCE: Halve Dancer AC bonuses, rounding each passive total down.
+// Run after copying the bundled resources and before ADD_KIT_EX reads the CLAB.
+COPY_EXISTING ~C0DANCE.2DA~ ~override~
+  COUNT_2DA_COLS c0_dance_columns
+  COUNT_2DA_ROWS c0_dance_columns c0_dance_rows
+  SET c0_dance_missile_grants = 0
+  FOR (c0_dance_level = 1; c0_dance_level < c0_dance_columns; ++c0_dance_level) BEGIN
+    FOR (c0_dance_row = 0; c0_dance_row < c0_dance_rows; ++c0_dance_row) BEGIN
+      READ_2DA_ENTRY c0_dance_row c0_dance_level c0_dance_columns c0_dance_entry
+      PATCH_IF (~%c0_dance_entry%~ STRING_EQUAL_CASE ~AP_C0DANCE2~) BEGIN
+        SET c0_dance_missile_grants += 1
+        // Keep every second +1 grant: levels 5, 15, 25 and 35.
+        PATCH_IF ((c0_dance_missile_grants MODULO 2) = 1) BEGIN
+          SET_2DA_ENTRY c0_dance_row c0_dance_level c0_dance_columns ~****~
+        END
+      END
+    END
+  END
+  BUT_ONLY
+
+COPY_EXISTING ~C0DANCE1.SPL~ ~override~
+              ~C0DANCSO.SPL~ ~override~
+              ~C0DANCS2.SPL~ ~override~
+  READ_LONG 0x64 c0_dance_abilities
+  READ_SHORT 0x68 c0_dance_ability_count
+  READ_LONG 0x6a c0_dance_effects
+  FOR (c0_dance_header = 0; c0_dance_header < c0_dance_ability_count; ++c0_dance_header) BEGIN
+    SET c0_dance_ability = c0_dance_abilities + 0x28 * c0_dance_header
+    READ_SHORT (c0_dance_ability + 0x1e) c0_dance_count
+    READ_SHORT (c0_dance_ability + 0x20) c0_dance_first
+    FOR (c0_dance_index = c0_dance_first; c0_dance_index < c0_dance_first + c0_dance_count; ++c0_dance_index) BEGIN
+      SET c0_dance_effect = c0_dance_effects + 0x30 * c0_dance_index
+      READ_SHORT c0_dance_effect c0_dance_opcode
+      READ_LONG (c0_dance_effect + 0x04) c0_dance_amount
+      READ_LONG (c0_dance_effect + 0x08) c0_dance_mode
+      PATCH_IF (c0_dance_opcode = 0) BEGIN
+        PATCH_IF (c0_dance_mode = 16) BEGIN
+          // Mode 16 sets base AC: halve the improvement from unarmored AC 10.
+          WRITE_LONG (c0_dance_effect + 0x04) (10 - ((10 - c0_dance_amount) / 2))
+        END ELSE PATCH_IF (c0_dance_mode = 0 AND c0_dance_amount > 0) BEGIN
+          WRITE_LONG (c0_dance_effect + 0x04) (c0_dance_amount / 2)
+        END
+      END ELSE PATCH_IF ((~%SOURCE_RES%~ STRING_EQUAL_CASE ~C0DANCS2~) AND
+                        (c0_dance_opcode = 278 OR c0_dance_opcode = 285 OR c0_dance_opcode = 286)) BEGIN
+        // Enhanced song: match the level-21 normal song's +5 hit/damage.
+        WRITE_LONG (c0_dance_effect + 0x04) 5
+      END
+    END
+  END
+  BUT_ONLY

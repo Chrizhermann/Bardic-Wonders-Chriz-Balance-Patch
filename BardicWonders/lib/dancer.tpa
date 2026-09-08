@@ -2,6 +2,8 @@
 
 COPY ~%MOD_FOLDER%/dancer~ ~override~
 
+INCLUDE ~%MOD_FOLDER%/lib/dancer_balance.tpa~
+
 COPY_EXISTING ~LUBA0.2DA~ ~OVERRIDE/LUC0DANC.2DA~
   REPLACE_TEXTUALLY ~AP_SPCL920~ ~AP_C0DANCHL~
 
@@ -38,15 +40,15 @@ LAF ADD_KIT_EX
 
 ADVANTAGES:
 – May place 3 slots in Two-Weapon Style.
-– +2 bonus to base Armor Class at 1st level. Gains an additional +1 bonus at 10th level and every 10 levels thereafter.
-– +1 bonus to Armor Class vs. missile weapons at 1st level. Gains an additional +1 bonus to Armor Class every 5 levels.
+– +1 bonus to base Armor Class at 1st level. Gains an additional +1 bonus at 20th level and every 20 levels thereafter.
+– +1 bonus to Armor Class vs. missile weapons at 5th level. Gains an additional +1 bonus every 10 levels thereafter.
 – +2 to movement rate.
 – The Dancer's Bard Song, "Dance of the Floating Lily", immobilizes the dancer while inspiring <PRO_HISHER> allies, providing immunity to fear and morale failure and grants the following bonuses:
-	1st level: +1 to hit and damage, +1/2 attack per round, dancer gains +2 to Armor Class
-	6th level: +2 to hit and damage, +1/2 attack per round, dancer gains +4 to Armor Class
-	11th level: +3 to hit and damage, +1/2 attack per round, dancer gains +6 to Armor Class
-	16th level: +4 to hit and damage, +1 attack per round, dancer gains +8 to Armor Class
-	21st level: +5 to hit and damage, +1 attack per round, dancer gains +10 to Armor Class
+	1st level: +1 to hit and damage, +1/2 attack per round, dancer gains +1 to Armor Class
+	6th level: +2 to hit and damage, +1/2 attack per round, dancer gains +2 to Armor Class
+	11th level: +3 to hit and damage, +1/2 attack per round, dancer gains +3 to Armor Class
+	16th level: +4 to hit and damage, +1 attack per round, dancer gains +4 to Armor Class
+	21st level: +5 to hit and damage, +1 attack per round, dancer gains +5 to Armor Class
 
 – From 4th level onwards, may use the Adrenaline Rush ability once per day. Gains an additional use at 8th and 12th level.
 
@@ -154,15 +156,15 @@ STRING_SET_EVALUATE kit_strref ~DANCER: The dancer is an entertainer, an acrobat
 
 ADVANTAGES:
 – Gains 3 points in Two-Weapon Style at 1st level.
-– +2 bonus to base Armor Class at 1st level. Gains an additional +1 bonus at 10th level and every 10 levels thereafter.
-– +1 bonus to Armor Class vs. missile weapons at 1st level. Gains an additional +1 bonus to Armor Class every 5 levels.
+– +1 bonus to base Armor Class at 1st level. Gains an additional +1 bonus at 20th level and every 20 levels thereafter.
+– +1 bonus to Armor Class vs. missile weapons at 5th level. Gains an additional +1 bonus every 10 levels thereafter.
 – +2 to movement rate.
 – The Dancer's Bard Song, "Dance of the Floating Lily", immobilizes the dancer while inspiring <PRO_HISHER> allies, providing immunity to fear and morale failure and grants the following bonuses:
-	1st level: +1 to hit and damage, +1/2 attack per round, dancer gains +2 to Armor Class
-	6th level: +2 to hit and damage, +1/2 attack per round, dancer gains +4 to Armor Class
-	11th level: +3 to hit and damage, +1/2 attack per round, dancer gains +6 to Armor Class
-	16th level: +4 to hit and damage, +1 attack per round, dancer gains +8 to Armor Class
-	21st level: +5 to hit and damage, +1 attack per round, dancer gains +10 to Armor Class
+	1st level: +1 to hit and damage, +1/2 attack per round, dancer gains +1 to Armor Class
+	6th level: +2 to hit and damage, +1/2 attack per round, dancer gains +2 to Armor Class
+	11th level: +3 to hit and damage, +1/2 attack per round, dancer gains +3 to Armor Class
+	16th level: +4 to hit and damage, +1 attack per round, dancer gains +4 to Armor Class
+	21st level: +5 to hit and damage, +1 attack per round, dancer gains +5 to Armor Class
 
 – From 4th level onwards, may use the Adrenaline Rush ability once per day.
 
@@ -202,7 +204,8 @@ COPY ~%MOD_FOLDER%/Dancer/RR~ ~OVERRIDE~
 
 END
 
-COPY ~%MOD_FOLDER%/dancer/c0dancso.spl~ ~override~
+// Preserve the balance adjustments made before kit registration.
+COPY_EXISTING ~c0dancso.spl~ ~override~
   LPF ALTER_EFFECT
     INT_VAR
       timing = 10
@@ -225,6 +228,6 @@ COPY ~%MOD_FOLDER%/dancer/c0danchl.spl~ ~override~
 SAY NAME1 ~Swift-As-Flowing-Water~
 SAY NAME2 ~Swift-As-Flowing-Water~
 SAY UNIDENTIFIED_DESC ~Swift-As-Flowing-Water
-This oriental dance is a powerful aid to both the Dancer and to <PRO_HISHER> allies. The song gives the Dancer a +20 bonus to Armor Class as well as the ability to move at a reduced pace. The song also gives <PRO_HISHER> allies +8 to hit and damage as well as one extra attack per round and increased movement rate. There is also a 5% chance each round that any affected party member may gain the effects of Adrenaline Rush.
+This oriental dance is a powerful aid to both the Dancer and to <PRO_HISHER> allies. The song gives the Dancer a +10 bonus to Armor Class as well as the ability to move at a reduced pace. The song also gives <PRO_HISHER> allies +5 to hit and damage as well as one extra attack per round and increased movement rate. There is also a 5% chance each round that any affected party member may gain the effects of Adrenaline Rush.
 
 This ability replaces the current Bard Song.~

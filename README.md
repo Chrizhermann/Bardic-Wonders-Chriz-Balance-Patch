@@ -47,6 +47,7 @@ This fork exists strictly because I wanted a few balance knobs turned differentl
 | **Hymn of Requiem** (HLA) | Flat 60→6d10 damage/heal, Save vs. Spell for half | Flat unmitigated damage felt out of place; dice rolls add variance and counterplay |
 | **Song of Freedom** (HLA) | Removed 1-turn immunity, kept AoE cleanse | The AoE dispel is already a strong HLA; blanket immunity on top was redundant |
 | **Symphony of the Dark Children** (Abettor HLA) | Removed the +6 Luck/damage-luck, extra AC/vs.-Good, backstab-immunity, random-invisibility, and Time Stop package; reduced total save bonus from +5 to +1; intended one-round party Invisibility at song start/end | Keeps the core shadow-song identity without the unrelated singer-only power stack; start/end party Invisibility remains a [known issue](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5) |
+| **Dancer** (component 1005) | Halved passive and song AC bonuses, rounding passive totals down; normal song AC +1/+2/+3/+4/+5; Swift-As-Flowing-Water AC +20→+10 and hit/damage +8→+5 | Reduces defense across the kit and keeps enhanced song hit/damage at the normal level-21 value |
 
 **Legionnaire's March** is on the list but still being evaluated.
 
