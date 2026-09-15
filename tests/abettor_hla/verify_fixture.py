@@ -9,7 +9,7 @@ import struct
 import subprocess
 import sys
 
-from .ie_resources import parse_spl, read_eff_resource
+from .ie_resources import SYNTHETIC_KEY, parse_spl, read_controller_payload
 from .make_fixture import FIXTURE_SENTINEL, FIXTURE_SENTINEL_CONTENT
 
 
@@ -70,10 +70,9 @@ def run_weidu(fixture: Path, operation: str) -> subprocess.CompletedProcess[str]
             str(fixture / "Setup-AbettorHLARebalance.exe"),
             "--no-auto-tp2",
             "--noautoupdate",
-            "--nogame",
+            "--game",
+            str(fixture),
             "--search",
-            "override",
-            "--search-ids",
             "override",
             "--tlkin",
             "dialog.tlk",
@@ -127,9 +126,8 @@ def exact_effect(
 
 def validate_installed(fixture: Path, payload_resref: str, marker_counts: tuple[int, int]) -> None:
     override = fixture / "override"
-    pointer = override / "C0ABETS2.EFF"
-    if pointer.exists() and read_eff_resource(pointer) != payload_resref:
-        raise AssertionError("dynamic payload pointer changed")
+    if read_controller_payload(override / "C0ABETS2.SPL") != payload_resref:
+        raise AssertionError("dynamic payload reference changed")
 
     payload = parse_spl(override / f"{payload_resref}.SPL")
     for opcode in (92, 91, 90, 275, 59, 276, 277):
@@ -285,7 +283,9 @@ def verify(fixture: Path) -> None:
     sentinel = fixture / FIXTURE_SENTINEL
     if not sentinel.is_file() or sentinel.read_text(encoding="ascii") != FIXTURE_SENTINEL_CONTENT:
         raise AssertionError("directory is not a generated disposable Abettor fixture")
-    for marker in ("chitin.key", "Baldur.exe", "InfinityLoader.exe"):
+    if (fixture / "chitin.key").read_bytes() != SYNTHETIC_KEY:
+        raise AssertionError("fixture does not contain the empty synthetic resource index")
+    for marker in ("Baldur.exe", "InfinityLoader.exe"):
         if (fixture / marker).exists():
             raise AssertionError(f"refusing game-like fixture directory containing {marker}")
     manifest = json.loads((fixture / "fixture-manifest.json").read_text(encoding="utf-8"))
@@ -305,11 +305,11 @@ def verify(fixture: Path) -> None:
         raise AssertionError("fixture component order drifted since creation")
     tracked = (
         override / "C0ABETS2.SPL",
+        override / "PROJECTL.IDS",
         override / f"{payload_resref}.SPL",
         override / f"{payload_resref}.EFF",
         override / "C0ABETHL.SPL",
-        *(override / name for name in ("C0ABETS2.EFF", "LUC0ABET.2DA", "PROJECTL.IDS")
-          if (override / name).is_file()),
+        *(override / name for name in ("LUC0ABET.2DA",) if (override / name).is_file()),
     )
     before_hashes = {path: sha256(path) for path in tracked}
     before_components = component_ids(fixture / "WeiDU.log")

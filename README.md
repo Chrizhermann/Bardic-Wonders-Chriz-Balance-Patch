@@ -62,8 +62,10 @@ This fork exists strictly because I wanted a few balance knobs turned differentl
 
 The [Bard balance audit](docs/bard-balance-audit.md) records the review scope,
 remaining candidates, and focused live-playtest checks. These changes have
-automated resource/installer coverage; the complete release has not been
-validated in live combat. The Darkbloom Spell Revisions exclusion still applies.
+automated resource/installer coverage. The user reported successful Bard kit,
+shared-ability and Abettor playtesting on 16 September 2026 and approved release.
+That broad playtest does not separately establish the opening/finale party
+invisibility tracked in issue #5. The Darkbloom Spell Revisions exclusion still applies.
 
 ## Installation
 
@@ -72,7 +74,14 @@ select the desired kit components. Shared HLA changes require **High Level
 Abilities** (component `2007`). For Abettor's Symphony, install both **Abettor of
 Mask Kit** (component `1004`) and **Bard Song Mechanics Tweak** (component `2004`).
 Symphony is exposed only after component `2004` validates and patches the
-finite-song controller.
+finite-song controller. Version **v2.9c-balance.5** incorporates the pending
+component-2004 compatibility fix and the **1.1.0** Abettor tail: generated payload
+names, registered projectiles and allocated feedback strings are recognized;
+existing song refresh effects are preserved. The tail also restores a Symphony
+HLA row omitted by an earlier skipped validation.
+
+See the [component-2004 compatibility report](docs/abettor-component-2004-compatibility.md)
+for the root cause and preserved-resource checks.
 
 For an existing, already-stacked playthrough, do not reinstall older WeiDU
 components merely to pick up this change. Use the narrowly scoped tail component

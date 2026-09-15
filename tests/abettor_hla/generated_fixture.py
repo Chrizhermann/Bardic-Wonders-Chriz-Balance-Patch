@@ -30,5 +30,5 @@ def generated_resources(root: Path, payload: str, projectile: int = 444, display
         if struct.unpack_from("<H", template, offset)[0] == 139:
             struct.pack_into("<i", template, offset + 4, display_strref)
     (override / "C0SINGIN.SPL").write_bytes(template)
-    (override / "C0ABETS2.EFF").unlink()
+    (override / "C0ABETS2.EFF").unlink(missing_ok=True)
     (override / "PROJECTL.IDS").write_text(f"IDS V1.0\n{projectile - 1} C0BARDSO\n")

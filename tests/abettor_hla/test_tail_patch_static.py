@@ -27,8 +27,9 @@ class TailPatchStaticContractTests(unittest.TestCase):
 
     def test_tail_patch_resolves_the_payload_dynamically(self) -> None:
         self.assertTrue(PATCH_TPA.exists())
-        self.assertIn("C0ABETS2.EFF", self.patch)
-        self.assertIn("READ_ASCII 0x30", self.patch)
+        self.assertIn("C0_RESOLVE_ABETTOR_PAYLOAD", self.patch)
+        self.assertNotIn("C0ABETS2.EFF", self.patch)
+        self.assertIn("IDS_OF_SYMBOL (~PROJECTL~ ~C0BARDSO~)", self.patch)
         self.assertIn("FILE_EXISTS_IN_GAME ~%c0_abettor_payload%.SPL~", self.patch)
         self.assertNotIn("C0ABETS4", self.patch)
 

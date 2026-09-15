@@ -9,7 +9,7 @@ import re
 import shutil
 import sys
 
-from .ie_resources import discover_song_payload, read_eff_resource
+from .ie_resources import SYNTHETIC_KEY, read_controller_payload
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,20 +63,18 @@ def build_fixture(source: Path, destination: Path) -> dict[str, object]:
         raise RuntimeError(
             "reserved Abettor output already exists in source: " + ", ".join(collisions)
         )
-    payload_resref = discover_song_payload(require_file(source_override / "C0ABETS2.SPL"))
-    pointer = source_override / "C0ABETS2.EFF"
-    if pointer.exists() and read_eff_resource(pointer) != payload_resref:
-        raise ValueError("legacy pointer disagrees with the finite controller")
+    controller = require_file(source_override / "C0ABETS2.SPL")
+    payload_resref = read_controller_payload(controller)
     resource_names = (
         "C0ABETS2.SPL",
+        "PROJECTL.IDS",
         f"{payload_resref}.SPL",
         f"{payload_resref}.EFF",
         "C0ABETHL.SPL",
         "C0SINGIN.SPL",
         "C0SINGIN.EFF",
         "C0SINGI2.EFF",
-        *(name for name in ("C0ABETS2.EFF", "LUC0ABET.2DA", "PROJECTL.IDS")
-          if (source_override / name).is_file()),
+        *(name for name in ("LUC0ABET.2DA",) if (source_override / name).is_file()),
     )
 
     source_files: list[Path] = []
@@ -106,11 +104,15 @@ def build_fixture(source: Path, destination: Path) -> dict[str, object]:
         FIXTURE_SENTINEL_CONTENT,
         encoding="ascii",
     )
+    # An empty synthetic resource index enables WeiDU's real IDS lookup path.
+    # No original game's KEY or BIF data is copied.
+    (destination / "chitin.key").write_bytes(SYNTHETIC_KEY)
 
     fixture_inputs = (
         *(override / name for name in resource_names),
         destination / "dialog.tlk",
         destination / "WeiDU.log",
+        destination / "chitin.key",
     )
 
     manifest: dict[str, object] = {

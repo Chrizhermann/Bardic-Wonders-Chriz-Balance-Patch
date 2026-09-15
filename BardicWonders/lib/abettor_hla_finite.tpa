@@ -1,52 +1,3 @@
-// Resolve the generated payload from the actual finite controller. Legacy
-// installs can retain C0ABETS2.EFF; modern song generation only writes the
-// dynamically named EFF. The full controller/pointer validators still run.
-DEFINE_PATCH_FUNCTION C0_DISCOVER_ABETTOR_PAYLOAD
-  RET payload
-BEGIN
-  SPRINT payload ~~
-  SET scan_valid = 1
-  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
-    READ_ASCII 0 scan_signature (8)
-    READ_LONG 0x64 scan_abilities
-    READ_SHORT 0x68 scan_count
-    READ_LONG 0x6a scan_effects
-    PATCH_IF (~%scan_signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
-      AND (scan_count > 0)
-      AND (scan_abilities + scan_count * 0x28 <= BUFFER_LENGTH) BEGIN
-      FOR (scan_header = 0; scan_header < scan_count; ++scan_header) BEGIN
-        SET scan_ability = scan_abilities + scan_header * 0x28
-        READ_SHORT (scan_ability + 0x1e) scan_effect_count
-        READ_SHORT (scan_ability + 0x20) scan_first
-        SET candidate_count = 0
-        SPRINT candidate ~~
-        PATCH_IF (scan_effects + (scan_first + scan_effect_count) * 0x30 <= BUFFER_LENGTH) BEGIN
-          FOR (scan_index = 0; scan_index < scan_effect_count; ++scan_index) BEGIN
-            SET scan_effect = scan_effects + (scan_first + scan_index) * 0x30
-            READ_SHORT scan_effect scan_opcode
-            READ_BYTE (scan_effect + 0x0c) scan_timing
-            READ_LONG (scan_effect + 0x0e) scan_duration
-            PATCH_IF (scan_opcode = 177) AND (scan_timing = 10) AND (scan_duration > 0) BEGIN
-              READ_ASCII (scan_effect + 0x14) candidate (8) NULL
-              SET candidate_count += 1
-            END
-          END
-        END
-        PATCH_IF (candidate_count != 1)
-          OR !(~%candidate%~ STRING_MATCHES_REGEXP ~^[A-Za-z0-9_#@-][A-Za-z0-9_#@-]*$~ = 0)
-          OR (~%candidate%~ STRING_EQUAL_CASE ~C0ABIVI~)
-          OR (~%candidate%~ STRING_EQUAL_CASE ~C0ABIVS~)
-          OR (~%candidate%~ STRING_EQUAL_CASE ~C0ABIVE~)
-          OR ((scan_header > 0) AND !(~%candidate%~ STRING_EQUAL_CASE ~%payload%~)) BEGIN
-          SET scan_valid = 0
-        END
-        PATCH_IF (scan_header = 0) BEGIN SPRINT payload ~%candidate%~ END
-      END
-    END ELSE BEGIN SET scan_valid = 0 END
-  END ELSE BEGIN SET scan_valid = 0 END
-  PATCH_IF (scan_valid = 0) BEGIN SPRINT payload ~~ END
-END
-
 // Symphony of the Dark Children is only available with this finite-duration
 // controller. If the controller contract is not recognized, the HLA remains
 // absent rather than falling back to a toggle-compatible implementation.
@@ -137,11 +88,90 @@ BEGIN
   END
 END
 
+// Component 2004 writes a dynamic same-name SPL/EFF pair, referenced directly
+// by C0ABETS2.SPL. It does not create a C0ABETS2.EFF indirection resource.
+// Discover one common payload, then validate the complete controller and EFF.
+DEFINE_PATCH_FUNCTION C0_RESOLVE_ABETTOR_PAYLOAD
+  RET valid payload
+BEGIN
+  SET valid = 0
+  SPRINT payload ~~
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 signature (8)
+    READ_LONG 0x64 ability_offset
+    READ_SHORT 0x68 ability_count
+    READ_LONG 0x6a effect_offset
+    PATCH_IF
+      (~%signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
+      AND (ability_count > 0)
+      AND (ability_offset >= 0x72)
+      AND (ability_offset <= BUFFER_LENGTH)
+      AND (ability_count <= ((BUFFER_LENGTH - ability_offset) / 0x28))
+      AND (effect_offset >= (ability_offset + ability_count * 0x28))
+      AND (effect_offset <= BUFFER_LENGTH)
+    BEGIN
+      SET matching_headers = 0
+      SET references_valid = 1
+      FOR (header_index = 0; header_index < ability_count; ++header_index) BEGIN
+        SET header_offset = ability_offset + header_index * 0x28
+        READ_SHORT (header_offset + 0x1e) effect_count
+        READ_SHORT (header_offset + 0x20) first_effect
+        SET candidate_count = 0
+        PATCH_IF ((first_effect + effect_count) <= ((BUFFER_LENGTH - effect_offset) / 0x30)) BEGIN
+          FOR (index = first_effect; index < first_effect + effect_count; ++index) BEGIN
+            SET offset = effect_offset + index * 0x30
+            READ_SHORT offset opcode
+            READ_BYTE (offset + 2) target
+            READ_BYTE (offset + 0x0c) timing
+            READ_LONG (offset + 0x0e) duration
+            PATCH_IF (opcode = 177) AND (target = 9) AND (timing = 10) AND (duration > 0) BEGIN
+              SET candidate_count += 1
+              READ_ASCII (offset + 0x14) candidate (8) NULL
+              SET candidate_length = STRING_LENGTH ~%candidate%~
+              SET padding_valid = 1
+              FOR (padding_index = candidate_length; padding_index < 8; ++padding_index) BEGIN
+                READ_BYTE (offset + 0x14 + padding_index) padding_byte
+                PATCH_IF (padding_byte != 0) BEGIN SET padding_valid = 0 END
+              END
+              PATCH_IF
+                (candidate_length > 0)
+                AND (~%candidate%~ STRING_MATCHES_REGEXP ~^[A-Za-z0-9_#@-][A-Za-z0-9_#@-]*$~ = 0)
+                AND (padding_valid = 1)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0ABETS2~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0SINGIN~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0SINGI2~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0ABIVI~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0ABIVS~)
+                AND !(~%candidate%~ STRING_EQUAL_CASE ~C0ABIVE~)
+              BEGIN
+                PATCH_IF (~%payload%~ STRING_EQUAL ~~) BEGIN
+                  SPRINT payload ~%candidate%~
+                END ELSE PATCH_IF !(~%payload%~ STRING_EQUAL_CASE ~%candidate%~) BEGIN
+                  SET references_valid = 0
+                END
+              END ELSE BEGIN
+                SET references_valid = 0
+              END
+            END
+          END
+        END ELSE BEGIN
+          SET references_valid = 0
+        END
+        PATCH_IF (candidate_count = 1) BEGIN SET matching_headers += 1 END
+      END
+      PATCH_IF (references_valid = 1) AND (matching_headers = ability_count) BEGIN
+        SET valid = 1
+      END
+    END
+  END
+  PATCH_IF (valid = 0) BEGIN SPRINT payload ~~ END
+END
+
 DEFINE_PATCH_FUNCTION C0_VALIDATE_ABETTOR_FINITE_CONTROLLER
   INT_VAR
     expected_start_hooks = 0
     expected_end_hooks = 0
-    registered_projectile = 1
+    expected_controller_projectile = 0
   STR_VAR
     expected_payload = ~~
   RET
@@ -164,10 +194,16 @@ BEGIN
       (~%signature%~ STRING_EQUAL_CASE ~SPL V1  ~)
       AND (spell_type = 5)
       AND (ability_count > 0)
+      AND (expected_controller_projectile > 0)
+      AND (expected_controller_projectile <= 65535)
       // C0BARDSO contributes its two casting-level reset/start effects.
       AND (global_effect_count = 2)
-      AND ((ability_offset + ability_count * 0x28) <= BUFFER_LENGTH)
-      AND (global_effect_end <= BUFFER_LENGTH)
+      AND (ability_offset >= 0x72)
+      AND (ability_offset <= BUFFER_LENGTH)
+      AND (ability_count <= ((BUFFER_LENGTH - ability_offset) / 0x28))
+      AND (effect_offset >= (ability_offset + ability_count * 0x28))
+      AND (effect_offset <= BUFFER_LENGTH)
+      AND ((first_global_effect + global_effect_count) <= ((BUFFER_LENGTH - effect_offset) / 0x30))
     BEGIN
       SET global_effects_valid = 0
       SET global_reset = first_global_offset
@@ -281,7 +317,7 @@ BEGIN
           AND (ability_damage_type = 1)
           AND (ability_charges = 1)
           AND (ability_depletion = 1)
-          AND ((ability_projectile = 1) OR (ability_projectile = registered_projectile))
+          AND (ability_projectile = expected_controller_projectile)
           AND (header_effect_end <= BUFFER_LENGTH)
         BEGIN
           SET generic_start_count = 0
@@ -370,7 +406,7 @@ BEGIN
               AND (opcode = 146)
               AND (target = 9)
               AND (parameter1 = 0)
-              AND ((parameter2 = 0) OR (parameter2 = 1))
+              AND (parameter2 = 0)
               AND (timing = 1)
               AND (duration = 0)
               AND (probability1 = 100)
@@ -652,6 +688,8 @@ BEGIN
           PATCH_IF
             (target = 1)
             AND (power = 0)
+            // Only the feedback string is allocated at install time. The
+            // reset effect still requires parameter1=0; no timing is relaxed.
             AND (((opcode = 139) AND (parameter1 >= 0)) OR ((opcode = 136) AND (parameter1 = 0)))
             AND (parameter2 = 0)
             AND (timing = 1)
@@ -738,6 +776,11 @@ BEGIN
   BUT_ONLY
 
   OUTER_SET c0_abettor_pointer_valid = 0
+  OUTER_SET c0_abettor_required_resources = 0
+  OUTER_SET c0_abettor_controller_projectile = 0
+  ACTION_IF VARIABLE_IS_SET c0bardso BEGIN
+    OUTER_SET c0_abettor_controller_projectile = c0bardso
+  END
   OUTER_SET c0_abettor_payload_eff_valid = 0
   OUTER_SET c0_abettor_controller_valid = 0
   OUTER_SET c0_abettor_spell_template_valid = 0
@@ -746,26 +789,6 @@ BEGIN
   OUTER_SET c0_abettor_party_projectile = 0
   OUTER_SET c0_abettor_reserved_outputs_clear = 1
   OUTER_TEXT_SPRINT c0_abettor_payload ~~
-
-  // Resolve the payload before considering an optional legacy pointer alias.
-  OUTER_TEXT_SPRINT c0_abettor_pointer ~~
-  ACTION_IF FILE_EXISTS_IN_GAME ~C0ABETS2.SPL~ BEGIN
-    COPY_EXISTING ~C0ABETS2.SPL~ ~override~
-      LPF C0_DISCOVER_ABETTOR_PAYLOAD RET discovered_payload = payload END
-      INNER_ACTION BEGIN
-        OUTER_TEXT_SPRINT c0_abettor_payload ~%discovered_payload%~
-      END
-    BUT_ONLY
-  END
-  OUTER_TEXT_SPRINT c0_abettor_pointer ~%c0_abettor_payload%.EFF~
-  ACTION_IF FILE_EXISTS_IN_GAME ~C0ABETS2.EFF~ BEGIN
-    OUTER_TEXT_SPRINT c0_abettor_pointer ~C0ABETS2.EFF~
-  END
-  OUTER_SET c0_abettor_song_projectile = 1
-  ACTION_IF FILE_EXISTS_IN_GAME ~PROJECTL.IDS~ BEGIN
-    OUTER_SET c0_abettor_song_projectile = IDS_OF_SYMBOL (~projectl~ ~C0BARDSO~) + 1
-  END
-
 
   ACTION_IF
     (FILE_EXISTS_IN_GAME ~C0ABIVI.SPL~)
@@ -779,58 +802,17 @@ BEGIN
   ACTION_IF
     (FILE_EXISTS_IN_GAME ~C0ABETHL.SPL~)
     AND (FILE_EXISTS_IN_GAME ~C0ABETS2.SPL~)
-    AND (FILE_EXISTS_IN_GAME ~%c0_abettor_pointer%~)
     AND (FILE_EXISTS_IN_GAME ~C0SINGIN.SPL~)
     AND (FILE_EXISTS_IN_GAME ~C0SINGIN.EFF~)
     AND (FILE_EXISTS_IN_GAME ~C0SINGI2.EFF~)
   BEGIN
-    COPY_EXISTING ~%c0_abettor_pointer%~ ~override~
-      PATCH_IF (BUFFER_LENGTH >= 0x110) BEGIN
-        LPF C0_VALIDATE_ABETTOR_EFF_RESERVED_FIELDS RET reserved_fields_valid = valid END
-        READ_ASCII 0 signature (8)
-        READ_ASCII 0x08 secondary_signature (8)
-        READ_LONG 0x10 opcode
-        READ_LONG 0x14 target
-        READ_LONG 0x18 power
-        READ_LONG 0x1c parameter1
-        READ_LONG 0x20 parameter2
-        READ_LONG 0x24 timing
-        READ_LONG 0x28 duration
-        READ_SHORT 0x2c probability1
-        READ_SHORT 0x2e probability2
-        READ_ASCII 0x30 payload (8) NULL
-        SET payload_length = STRING_LENGTH ~%payload%~
-        SET payload_padding_valid = 1
-        FOR (payload_index = payload_length; payload_index < 8; ++payload_index) BEGIN
-          READ_BYTE (0x30 + payload_index) payload_padding_byte
-          PATCH_IF (payload_padding_byte != 0) BEGIN
-            SET payload_padding_valid = 0
-          END
-        END
-        PATCH_IF
-          (~%signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
-          AND (~%secondary_signature%~ STRING_EQUAL_CASE ~EFF V2.0~)
-          AND (opcode = 146)
-          AND (target = 1)
-          AND (power = 0)
-          AND (parameter1 = 0)
-          AND (parameter2 = 1)
-          AND (timing = 1)
-          AND (duration = 0)
-          AND (probability1 = 100)
-          AND (probability2 = 0)
-          AND ((STRING_LENGTH ~%payload%~) > 0)
-          AND (~%payload%~ STRING_MATCHES_REGEXP ~^[A-Za-z0-9_#@-][A-Za-z0-9_#@-]*$~ = 0)
-          AND !(~%payload%~ STRING_EQUAL_CASE ~C0ABIVI~)
-          AND !(~%payload%~ STRING_EQUAL_CASE ~C0ABIVS~)
-          AND !(~%payload%~ STRING_EQUAL_CASE ~C0ABIVE~)
-          AND (payload_padding_valid = 1)
-          AND (reserved_fields_valid = 1)
-        BEGIN
-          INNER_ACTION BEGIN
-            OUTER_TEXT_SPRINT c0_abettor_payload ~%payload%~
-            OUTER_SET c0_abettor_pointer_valid = 1
-          END
+    OUTER_SET c0_abettor_required_resources = 1
+    COPY_EXISTING ~C0ABETS2.SPL~ ~override~
+      LPF C0_RESOLVE_ABETTOR_PAYLOAD RET payload_valid = valid resolved_payload = payload END
+      PATCH_IF (payload_valid = 1) BEGIN
+        INNER_ACTION BEGIN
+          OUTER_TEXT_SPRINT c0_abettor_payload ~%resolved_payload%~
+          OUTER_SET c0_abettor_pointer_valid = 1
         END
       END
     BUT_ONLY
@@ -921,9 +903,10 @@ BEGIN
 
     COPY_EXISTING ~C0ABETS2.SPL~ ~override~
       LPF C0_VALIDATE_ABETTOR_FINITE_CONTROLLER
-        INT_VAR registered_projectile = c0_abettor_song_projectile
+        INT_VAR
           expected_start_hooks = 0
           expected_end_hooks = 0
+          expected_controller_projectile = c0_abettor_controller_projectile
         STR_VAR
           expected_payload = EVAL ~%c0_abettor_payload%~
         RET
@@ -1108,9 +1091,10 @@ BEGIN
     OUTER_SET c0_abettor_post_valid = 0
     COPY_EXISTING ~C0ABETS2.SPL~ ~override~
       LPF C0_VALIDATE_ABETTOR_FINITE_CONTROLLER
-        INT_VAR registered_projectile = c0_abettor_song_projectile
+        INT_VAR
           expected_start_hooks = 1
           expected_end_hooks = 1
+          expected_controller_projectile = c0_abettor_controller_projectile
         STR_VAR
           expected_payload = EVAL ~%c0_abettor_payload%~
         RET
@@ -1143,6 +1127,7 @@ BEGIN
       FAIL ~Abettor finite controller failed post-patch validation; rolling back component 2004.~
     END
   END ELSE BEGIN
+    PRINT ~Abettor validation: required_resources=%c0_abettor_required_resources%; payload_reference=%c0_abettor_pointer_valid%; payload=%c0_abettor_payload%; payload_eff=%c0_abettor_payload_eff_valid%; party_projectile=%c0_abettor_party_projectile%; controller=%c0_abettor_controller_valid%; expected_controller_projectile=%c0_abettor_controller_projectile%; spell_template=%c0_abettor_spell_template_valid%; start_template=%c0_abettor_start_template_valid%; end_template=%c0_abettor_end_template_valid%; reserved_outputs_clear=%c0_abettor_reserved_outputs_clear%.~
     WARN ~Finite Abettor song controller was not recognized; skipping Symphony of the Dark Children.~
   END
 END

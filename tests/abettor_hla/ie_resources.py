@@ -9,6 +9,7 @@ import struct
 SPL_HEADER_SIZE = 0x72
 SPL_ABILITY_SIZE = 0x28
 SPL_EFFECT_SIZE = 0x30
+SYNTHETIC_KEY = b"KEY V1  " + struct.pack("<4I", 0, 0, 0x18, 0x18)
 
 
 @dataclass(frozen=True)
@@ -143,22 +144,37 @@ def read_eff_resource(path: Path) -> str:
     return resource.upper()
 
 
-def discover_song_payload(controller: Path) -> str:
-    """Resolve the one periodic payload consistently referenced by every header."""
-    spell = parse_spl(controller)
+def read_controller_payload(path: Path) -> str:
+    """Resolve the actual opcode-177 payload independently of phantom EFF files."""
+    spell = parse_spl(path)
+    data = path.read_bytes()
+    ability_offset = struct.unpack_from("<I", data, 0x64)[0]
+    effect_offset = struct.unpack_from("<I", data, 0x6A)[0]
     payload: str | None = None
-    for ability in spell.abilities:
-        candidates = [e.resource for e in ability.effects
-                      if e.opcode == 177 and e.timing == 10 and e.duration > 0]
+    reserved = {"C0ABETS2", "C0SINGIN", "C0SINGI2", "C0ABIVI", "C0ABIVS", "C0ABIVE"}
+    for index, ability in enumerate(spell.abilities):
+        candidates = [
+            (effect_index, effect)
+            for effect_index, effect in enumerate(ability.effects)
+            if effect.opcode == 177 and effect.target == 9
+            and effect.timing == 10 and effect.duration > 0
+        ]
         if len(candidates) != 1:
-            raise ValueError("finite song does not have one payload per header")
-        candidate = candidates[0]
-        if (re.fullmatch(r"[A-Za-z0-9_#@-]{1,8}", candidate) is None
-                or candidate in {"C0ABIVI", "C0ABIVS", "C0ABIVE"}):
-            raise ValueError("finite song has an invalid or reserved payload")
-        if payload is not None and payload != candidate:
-            raise ValueError("finite song headers disagree about their payload")
-        payload = candidate
+            raise ValueError(f"controller header {index} has no unique payload reference: {path}")
+        effect_index, effect = candidates[0]
+        first_effect = struct.unpack_from("<H", data, ability_offset + index * 0x28 + 0x20)[0]
+        offset = effect_offset + (first_effect + effect_index) * 0x30 + 0x14
+        raw = data[offset:offset + 8]
+        prefix, separator, padding = raw.partition(b"\0")
+        if separator and any(padding):
+            raise ValueError(f"controller payload has non-NUL resource padding: {path}")
+        if re.fullmatch(rb"[A-Za-z0-9_#@-]{1,8}", prefix) is None:
+            raise ValueError(f"controller payload has an invalid resource field: {path}")
+        if effect.resource in reserved:
+            raise ValueError(f"controller payload aliases a reserved resource: {path}")
+        if payload is not None and payload != effect.resource:
+            raise ValueError(f"controller headers disagree on the payload resource: {path}")
+        payload = effect.resource
     if payload is None:
-        raise ValueError("finite song controller has no abilities")
+        raise ValueError(f"controller has no payload reference: {path}")
     return payload

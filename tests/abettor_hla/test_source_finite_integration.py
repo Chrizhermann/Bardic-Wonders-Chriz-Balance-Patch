@@ -33,15 +33,17 @@ class SourceFiniteIntegrationTests(unittest.TestCase):
     def test_integration_validates_the_finite_controller_and_dynamic_payload(self) -> None:
         self.assertTrue(FINITE_INTEGRATION.exists())
         for token in (
-            "C0ABETS2.EFF",
+            "C0_RESOLVE_ABETTOR_PAYLOAD",
             "READ_ASCII 0x30",
             "C0SINGIN",
             "C0SINGI2",
             "C0_VALIDATE_ABETTOR_FINITE_CONTROLLER",
+            "expected_controller_projectile",
             "FILE_EXISTS_IN_GAME",
         ):
             with self.subTest(token=token):
                 self.assertIn(token, self.integration)
+        self.assertNotIn("FILE_EXISTS_IN_GAME ~C0ABETS2.EFF~", self.integration)
 
     def test_integration_adds_abettor_only_start_and_end_hooks(self) -> None:
         for token in ("C0ABIVI", "C0ABIVS", "C0ABIVE", "CLONE_EFFECT"):
@@ -57,7 +59,7 @@ class SourceFiniteIntegrationTests(unittest.TestCase):
             re.compile(r"match_resource\s*=\s*C0SINGI2.*resource\s*=\s*C0ABIVE", re.DOTALL),
         )
         self.assertIn("projectile = c0_abettor_party_projectile", self.integration)
-        self.assertNotIn("projectile = c0bardso", self.integration)
+        self.assertIn("c0_abettor_controller_projectile = c0bardso", self.integration)
 
     def test_hla_row_is_added_only_on_the_validated_path(self) -> None:
         self.assertIn("patch_add_hla", self.integration)

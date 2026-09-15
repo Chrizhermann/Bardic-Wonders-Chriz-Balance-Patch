@@ -26,7 +26,7 @@ def controller_bytes(
     start_special: int = 0,
     end_special: int = 40,
     first_global_opcode: int = 136,
-    header_projectile: int = 1,
+    header_projectile: int = 559,
     start_probability: int = 100,
     extra_start_probability: int | None = None,
     extra_start_resist_dispel: int = 0,
@@ -58,7 +58,7 @@ def controller_bytes(
                 effect_bytes(
                     146,
                     target=9,
-                    parameter2=1,
+                    parameter2=0,
                     timing=1,
                     duration=0,
                     resource="C0BARDSX",
@@ -208,7 +208,7 @@ class WeiduFiniteIntegrationTests(unittest.TestCase):
         start_special: int = 0,
         end_special: int = 40,
         first_global_opcode: int = 136,
-        header_projectile: int = 1,
+        header_projectile: int = 559,
         start_probability: int = 100,
         extra_start_probability: int | None = None,
         extra_start_resist_dispel: int = 0,
@@ -252,7 +252,6 @@ class WeiduFiniteIntegrationTests(unittest.TestCase):
             (ROOT / "BardicWonders" / "bardsong" / "c0bardso.eff").read_bytes()
         )
         pointer[0x30:0x38] = payload_resref.encode("ascii").ljust(8, b"\0")
-        (override / "C0ABETS2.EFF").write_bytes(pointer)
         (override / f"{payload_resref}.EFF").write_bytes(pointer)
         if finite:
             (override / "C0ABETS2.SPL").write_bytes(
@@ -305,8 +304,6 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
                 "--nogame",
                 "--search",
                 "override",
-                "--search-ids",
-                "override",
                 "--no-exit-pause",
                 "--language",
                 "0",
@@ -319,38 +316,6 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
             capture_output=True,
             check=False,
         )
-
-    def test_current_generated_controller_without_legacy_alias_is_enabled(self) -> None:
-        from .generated_fixture import generated_resources
-        for projectile, payload in ((444, "QXNEW01"), (913, "Z9SONG")):
-            with self.subTest(projectile=projectile), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                self.make_fixture(root, finite=True, payload_resref=payload)
-                generated_resources(root, payload, projectile)
-                before_payload = (root / "override" / f"{payload}.SPL").read_bytes()
-                result = self.install(root)
-                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-                self.assertIn("Symphony of the Dark Children enabled", result.stdout)
-                self.assertFalse((root / "override/C0ABETS2.EFF").exists())
-                self.assertEqual(before_payload, (root / "override" / f"{payload}.SPL").read_bytes())
-                controller = parse_spl(root / "override/C0ABETS2.SPL")
-                self.assertEqual(11, len(controller.abilities))
-                for ability in controller.abilities:
-                    self.assertEqual(projectile, ability.projectile)
-                    self.assertEqual(1, sum(e.resource == "C0ABIVS" for e in ability.effects))
-                    self.assertEqual(1, sum(e.resource == "C0ABIVE" for e in ability.effects))
-
-    def test_generated_controller_with_unregistered_projectile_is_rejected(self) -> None:
-        from .generated_fixture import generated_resources
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.make_fixture(root, finite=True)
-            generated_resources(root, "ZZPAYLD", 444)
-            (root / "override/PROJECTL.IDS").write_text("IDS V1.0\n555 C0BARDSO\n")
-            result = self.install(root)
-            self.assertEqual(3, result.returncode, result.stdout + result.stderr)
-            self.assertIn("skipping Symphony of the Dark Children", result.stdout)
-            self.assertFalse((root / "override/C0ABIVI.SPL").exists())
 
     def test_recognized_controller_gets_one_start_and_end_hook_per_header(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -423,7 +388,7 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
             table = (root / "override" / "LUC0ABET.2DA").read_text(encoding="ascii")
             self.assertEqual(1, table.count("AP_C0ABETHL"))
             self.assertEqual(
-                "ZZPAYLD", read_eff_resource(root / "override" / "C0ABETS2.EFF")
+                "ZZPAYLD", read_eff_resource(root / "override" / "ZZPAYLD.EFF")
             )
 
     def test_toggle_or_unrecognized_song_keeps_symphony_unavailable(self) -> None:
@@ -633,7 +598,7 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_fixture(root, finite=True)
-            pointer = root / "override" / "C0ABETS2.EFF"
+            pointer = root / "override" / "ZZPAYLD.EFF"
             data = bytearray(pointer.read_bytes())
             struct.pack_into("<I", data, 0x10, 12)
             pointer.write_bytes(data)
@@ -750,7 +715,7 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_fixture(root, finite=True)
-            pointer = root / "override" / "C0ABETS2.EFF"
+            pointer = root / "override" / "ZZPAYLD.EFF"
             data = bytearray(pointer.read_bytes())
             data[0x08:0x10] = b"BROKEN!!"
             pointer.write_bytes(data)
@@ -846,6 +811,87 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
 
             self.assertIn(result.returncode, (0, 3), result.stdout + result.stderr)
             self.assertFalse((root / "override" / "C0ABIVI.SPL").exists())
+
+    def assert_rejected(self, root: Path, *, diagnostic: str) -> None:
+        controller = root / "override" / "C0ABETS2.SPL"
+        before = controller.read_bytes()
+        result = self.install(root)
+        self.assertEqual(3, result.returncode, result.stdout + result.stderr)
+        self.assertIn(diagnostic, result.stdout)
+        self.assertIn("skipping Symphony of the Dark Children", result.stdout)
+        self.assertEqual(before, controller.read_bytes())
+        for resource in ("C0ABIVI.SPL", "C0ABIVS.EFF", "C0ABIVE.EFF"):
+            self.assertFalse((root / "override" / resource).exists())
+        table = (root / "override" / "LUC0ABET.2DA").read_text(encoding="ascii")
+        self.assertNotIn("AP_C0ABETHL", table)
+
+    def test_ambiguous_or_malformed_controller_payload_is_rejected(self) -> None:
+        cases = ("disagreement", "duplicate", "padding", "invalid_character", "self_alias", "bounds")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root, finite=True)
+                path = root / "override" / "C0ABETS2.SPL"
+                data = bytearray(path.read_bytes())
+                effects = struct.unpack_from("<I", data, 0x6A)[0]
+                # Two global effects precede eight effects per synthetic header.
+                payload = effects + (2 + 2) * 0x30
+                if case == "disagreement":
+                    second_payload = payload + 8 * 0x30
+                    data[second_payload + 0x14:second_payload + 0x1C] = b"OTHER\0\0\0"
+                elif case == "duplicate":
+                    data[effects + 2 * 0x30:effects + 3 * 0x30] = data[payload:payload + 0x30]
+                elif case == "padding":
+                    data[payload + 0x14:payload + 0x1C] = b"ZZP\0BAD!"
+                elif case == "invalid_character":
+                    data[payload + 0x14:payload + 0x1C] = b"BAD/REF\0"
+                elif case == "self_alias":
+                    data[payload + 0x14:payload + 0x1C] = b"C0ABETS2"
+                elif case == "bounds":
+                    struct.pack_into("<I", data, 0x64, 0x7FFFFFFF)
+                path.write_bytes(data)
+                self.assert_rejected(root, diagnostic="payload_reference=0;")
+
+    def test_ability_cast_mode_remains_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, finite=True)
+            path = root / "override" / "C0ABETS2.SPL"
+            data = bytearray(path.read_bytes())
+            effects = struct.unpack_from("<I", data, 0x6A)[0]
+            struct.pack_into("<I", data, effects + 3 * 0x30 + 0x08, 1)
+            path.write_bytes(data)
+            self.assert_rejected(root, diagnostic="controller=0;")
+
+    def test_missing_producer_projectile_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, finite=True)
+            tp2 = root / "testmod" / "setup-test.tp2"
+            tp2.write_text(tp2.read_text().replace("OUTER_SET c0bardso = 559", ""), encoding="ascii")
+            self.assert_rejected(root, diagnostic="expected_controller_projectile=0;")
+
+    def test_localized_feedback_does_not_relax_other_template_effects(self) -> None:
+        for opcode, parameter1, accepted in ((139, 224503, True), (139, -1, False), (136, 1, False)):
+            with self.subTest(opcode=opcode, parameter1=parameter1), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root, finite=True)
+                path = root / "override" / "C0SINGIN.SPL"
+                data = bytearray(path.read_bytes())
+                effects = struct.unpack_from("<I", data, 0x6A)[0]
+                matched = 0
+                for offset in range(effects, len(data), 0x30):
+                    if struct.unpack_from("<H", data, offset)[0] == opcode:
+                        struct.pack_into("<i", data, offset + 4, parameter1)
+                        matched += 1
+                self.assertEqual(1, matched)
+                path.write_bytes(data)
+                if accepted:
+                    result = self.install(root)
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    self.assertTrue((root / "override" / "C0ABIVI.SPL").exists())
+                else:
+                    self.assert_rejected(root, diagnostic="spell_template=0;")
 
 
 if __name__ == "__main__":
