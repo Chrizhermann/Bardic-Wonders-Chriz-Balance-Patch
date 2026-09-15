@@ -149,6 +149,12 @@ def component_ids(path: Path) -> list[tuple[str, int, int]]:
     return entries
 
 
+def parse_spl_bytes_for_test(data: bytes, root: Path):
+    path = root / "original-controller.spl"
+    path.write_bytes(data)
+    return parse_spl(path)
+
+
 class TailPatchIntegrationTests(unittest.TestCase):
     def make_fixture(
         self,
@@ -243,6 +249,8 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 "--nogame",
                 "--search",
                 "override",
+                "--search-ids",
+                "override",
                 "--tlkin",
                 "dialog.tlk",
                 "--tlkout",
@@ -259,6 +267,36 @@ class TailPatchIntegrationTests(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+    def test_current_generated_resources_restore_skipped_hla_and_uninstall_exactly(self) -> None:
+        from .generated_fixture import generated_resources
+        from .test_weidu_finite_integration import HLA_TABLE
+        for projectile, payload in ((444, "X6SONG"), (913, "QZNEW02")):
+            with self.subTest(projectile=projectile), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root, payload_resref=payload)
+                generated_resources(root, payload, projectile)
+                override = root / "override"
+                (override / "LUC0ABET.2DA").write_text("\n".join(
+                    line for line in HLA_TABLE.splitlines() if "AP_C0ABETHL" not in line
+                ) + "\n")
+                before = {p.name: p.read_bytes() for p in override.iterdir()}
+                install = self.weidu(root, "install")
+                self.assertEqual(0, install.returncode, install.stdout + install.stderr)
+                self.assertFalse((override / "C0ABETS2.EFF").exists())
+                self.assertEqual(before[f"{payload}.SPL"], (override / f"{payload}.SPL").read_bytes())
+                self.assertEqual(1, (override / "LUC0ABET.2DA").read_text().count("AP_C0ABETHL"))
+                self.assertIn("AP_C0ABETT5", (override / "LUC0ABET.2DA").read_text())
+                old_controller = parse_spl_bytes_for_test(before["C0ABETS2.SPL"], root)
+                new_controller = parse_spl(override / "C0ABETS2.SPL")
+                self.assertEqual(11, len(new_controller.abilities))
+                for old, new in zip(old_controller.abilities, new_controller.abilities):
+                    self.assertEqual(projectile, new.projectile)
+                    self.assertEqual(list(old.effects), [e for e in new.effects if e.resource not in {"C0ABIVS", "C0ABIVE"}])
+                    self.assertEqual(len(old.effects) + 2, len(new.effects))
+                uninstall = self.weidu(root, "uninstall")
+                self.assertEqual(0, uninstall.returncode, uninstall.stdout + uninstall.stderr)
+                self.assertEqual(before, {p.name: p.read_bytes() for p in override.iterdir()})
 
     def test_install_uses_dynamic_payload_and_uninstall_restores_exact_hashes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

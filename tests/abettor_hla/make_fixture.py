@@ -9,7 +9,7 @@ import re
 import shutil
 import sys
 
-from .ie_resources import read_eff_resource
+from .ie_resources import discover_song_payload, read_eff_resource
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,17 +63,20 @@ def build_fixture(source: Path, destination: Path) -> dict[str, object]:
         raise RuntimeError(
             "reserved Abettor output already exists in source: " + ", ".join(collisions)
         )
-    pointer = require_file(source_override / "C0ABETS2.EFF")
-    payload_resref = read_eff_resource(pointer)
+    payload_resref = discover_song_payload(require_file(source_override / "C0ABETS2.SPL"))
+    pointer = source_override / "C0ABETS2.EFF"
+    if pointer.exists() and read_eff_resource(pointer) != payload_resref:
+        raise ValueError("legacy pointer disagrees with the finite controller")
     resource_names = (
         "C0ABETS2.SPL",
-        "C0ABETS2.EFF",
         f"{payload_resref}.SPL",
         f"{payload_resref}.EFF",
         "C0ABETHL.SPL",
         "C0SINGIN.SPL",
         "C0SINGIN.EFF",
         "C0SINGI2.EFF",
+        *(name for name in ("C0ABETS2.EFF", "LUC0ABET.2DA", "PROJECTL.IDS")
+          if (source_override / name).is_file()),
     )
 
     source_files: list[Path] = []

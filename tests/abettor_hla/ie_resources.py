@@ -141,3 +141,24 @@ def read_eff_resource(path: Path) -> str:
     if re.fullmatch(r"[A-Za-z0-9_#@-]{1,8}", resource) is None:
         raise ValueError(f"EFF has an invalid resource field: {path}")
     return resource.upper()
+
+
+def discover_song_payload(controller: Path) -> str:
+    """Resolve the one periodic payload consistently referenced by every header."""
+    spell = parse_spl(controller)
+    payload: str | None = None
+    for ability in spell.abilities:
+        candidates = [e.resource for e in ability.effects
+                      if e.opcode == 177 and e.timing == 10 and e.duration > 0]
+        if len(candidates) != 1:
+            raise ValueError("finite song does not have one payload per header")
+        candidate = candidates[0]
+        if (re.fullmatch(r"[A-Za-z0-9_#@-]{1,8}", candidate) is None
+                or candidate in {"C0ABIVI", "C0ABIVS", "C0ABIVE"}):
+            raise ValueError("finite song has an invalid or reserved payload")
+        if payload is not None and payload != candidate:
+            raise ValueError("finite song headers disagree about their payload")
+        payload = candidate
+    if payload is None:
+        raise ValueError("finite song controller has no abilities")
+    return payload

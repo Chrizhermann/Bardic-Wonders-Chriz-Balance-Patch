@@ -70,6 +70,24 @@ class DisposableFixtureCliTests(unittest.TestCase):
             self.assertEqual(0, verify.returncode, verify.stdout + verify.stderr)
             self.assertIn("DISPOSABLE_FIXTURE_VERIFICATION=PASS", verify.stdout)
 
+    def test_builder_and_verifier_support_current_generated_resources(self) -> None:
+        from .generated_fixture import generated_resources
+        from .test_weidu_finite_integration import HLA_TABLE
+        from .verify_fixture import verify
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source-game"
+            fixture_support.TailPatchIntegrationTests().make_fixture(source)
+            generated_resources(source, fixture_support.PAYLOAD_RESREF, 601)
+            (source / "override/LUC0ABET.2DA").write_text("\n".join(
+                line for line in HLA_TABLE.splitlines() if "AP_C0ABETHL" not in line
+            ) + "\n")
+            fixture = root / "fixture"
+            build_fixture(source, fixture)
+            self.assertFalse((fixture / "override/C0ABETS2.EFF").exists())
+            self.assertTrue((fixture / "override/PROJECTL.IDS").exists())
+            verify(fixture)
+
     def test_builder_refuses_each_reserved_output_collision(self) -> None:
         for name in ("C0ABIVI.SPL", "C0ABIVS.EFF", "C0ABIVE.EFF"):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:

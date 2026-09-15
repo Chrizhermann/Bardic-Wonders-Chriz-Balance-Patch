@@ -47,15 +47,17 @@ def tlk_entries(path: Path) -> list[tuple[int, bytes, int, int, str]]:
         raise AssertionError("invalid TLK signature")
     count = struct.unpack_from("<I", data, 0x0A)[0]
     entries: list[tuple[int, bytes, int, int, str]] = []
+    text_start = struct.unpack_from("<I", data, 0x0E)[0]
     for index in range(count):
         offset = 0x12 + index * 0x1A
+        text_offset, text_length = struct.unpack_from("<II", data, offset + 0x12)
         entries.append(
             (
                 struct.unpack_from("<H", data, offset)[0],
                 data[offset + 0x02 : offset + 0x0A],
                 struct.unpack_from("<I", data, offset + 0x0A)[0],
                 struct.unpack_from("<I", data, offset + 0x0E)[0],
-                tlk_string(path, index),
+                data[text_start + text_offset:text_start + text_offset + text_length].decode("utf-8"),
             )
         )
     return entries
@@ -70,6 +72,8 @@ def run_weidu(fixture: Path, operation: str) -> subprocess.CompletedProcess[str]
             "--noautoupdate",
             "--nogame",
             "--search",
+            "override",
+            "--search-ids",
             "override",
             "--tlkin",
             "dialog.tlk",
@@ -123,7 +127,8 @@ def exact_effect(
 
 def validate_installed(fixture: Path, payload_resref: str, marker_counts: tuple[int, int]) -> None:
     override = fixture / "override"
-    if read_eff_resource(override / "C0ABETS2.EFF") != payload_resref:
+    pointer = override / "C0ABETS2.EFF"
+    if pointer.exists() and read_eff_resource(pointer) != payload_resref:
         raise AssertionError("dynamic payload pointer changed")
 
     payload = parse_spl(override / f"{payload_resref}.SPL")
@@ -300,10 +305,11 @@ def verify(fixture: Path) -> None:
         raise AssertionError("fixture component order drifted since creation")
     tracked = (
         override / "C0ABETS2.SPL",
-        override / "C0ABETS2.EFF",
         override / f"{payload_resref}.SPL",
         override / f"{payload_resref}.EFF",
         override / "C0ABETHL.SPL",
+        *(override / name for name in ("C0ABETS2.EFF", "LUC0ABET.2DA", "PROJECTL.IDS")
+          if (override / name).is_file()),
     )
     before_hashes = {path: sha256(path) for path in tracked}
     before_components = component_ids(fixture / "WeiDU.log")
@@ -322,6 +328,15 @@ def verify(fixture: Path) -> None:
     validation_error: BaseException | None = None
     try:
         validate_installed(fixture, payload_resref, marker_counts)
+        after_payload = parse_spl(override / f"{payload_resref}.SPL")
+        if after_payload.find_effects(opcode=321) != before_payload.find_effects(opcode=321):
+            raise AssertionError("payload refresh effects changed")
+        hla_table = override / "LUC0ABET.2DA"
+        if hla_table.exists():
+            rows = [line.split() for line in hla_table.read_text().splitlines()]
+            matching = [row for row in rows if "AP_C0ABETHL" in row]
+            if len(matching) != 1 or "AP_C0ABETT5" not in matching[0]:
+                raise AssertionError("Symphony HLA row or prerequisite is invalid")
         if tlk_entries(fixture / "dialog.tlk")[: len(before_tlk_entries)] != before_tlk_entries:
             raise AssertionError("install changed a pre-existing TLK entry")
         installed_components = component_ids(fixture / "WeiDU.log")

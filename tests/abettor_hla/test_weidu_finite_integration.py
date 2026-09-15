@@ -305,6 +305,8 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
                 "--nogame",
                 "--search",
                 "override",
+                "--search-ids",
+                "override",
                 "--no-exit-pause",
                 "--language",
                 "0",
@@ -317,6 +319,38 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
             capture_output=True,
             check=False,
         )
+
+    def test_current_generated_controller_without_legacy_alias_is_enabled(self) -> None:
+        from .generated_fixture import generated_resources
+        for projectile, payload in ((444, "QXNEW01"), (913, "Z9SONG")):
+            with self.subTest(projectile=projectile), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root, finite=True, payload_resref=payload)
+                generated_resources(root, payload, projectile)
+                before_payload = (root / "override" / f"{payload}.SPL").read_bytes()
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertIn("Symphony of the Dark Children enabled", result.stdout)
+                self.assertFalse((root / "override/C0ABETS2.EFF").exists())
+                self.assertEqual(before_payload, (root / "override" / f"{payload}.SPL").read_bytes())
+                controller = parse_spl(root / "override/C0ABETS2.SPL")
+                self.assertEqual(11, len(controller.abilities))
+                for ability in controller.abilities:
+                    self.assertEqual(projectile, ability.projectile)
+                    self.assertEqual(1, sum(e.resource == "C0ABIVS" for e in ability.effects))
+                    self.assertEqual(1, sum(e.resource == "C0ABIVE" for e in ability.effects))
+
+    def test_generated_controller_with_unregistered_projectile_is_rejected(self) -> None:
+        from .generated_fixture import generated_resources
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, finite=True)
+            generated_resources(root, "ZZPAYLD", 444)
+            (root / "override/PROJECTL.IDS").write_text("IDS V1.0\n555 C0BARDSO\n")
+            result = self.install(root)
+            self.assertEqual(3, result.returncode, result.stdout + result.stderr)
+            self.assertIn("skipping Symphony of the Dark Children", result.stdout)
+            self.assertFalse((root / "override/C0ABIVI.SPL").exists())
 
     def test_recognized_controller_gets_one_start_and_end_hook_per_header(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
