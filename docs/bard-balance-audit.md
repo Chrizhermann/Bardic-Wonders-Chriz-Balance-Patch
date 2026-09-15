@@ -103,3 +103,16 @@ Before calling the release live accepted, test in a disposable installation:
 No live game or save was modified during this review. The separate Abettor tail
 installer remains version 1.0.0 and does not apply these additional changes to
 an existing stacked playthrough.
+
+## September 16 release follow-up
+
+The user tested the Bard kits, shared abilities and Abettor and approved release.
+Version `v2.9c-balance.5` includes the full balance.4 changes above plus the pending
+component-2004 compatibility fix. The standalone Abettor tail is now `1.1.0` and
+can restore a Symphony HLA omitted by the earlier validation skip. Existing song
+refresh effects and later-mod markers are preserved. Automated producer and
+copied-resource install/uninstall checks cover this installer change.
+
+The narrower opening/finale party invisibility issue #5 remains open; broad kit
+approval does not establish those exact engine events. Darkbloom's Spell Revisions
+exclusion and the other compatibility/deferred-design items above remain in force.

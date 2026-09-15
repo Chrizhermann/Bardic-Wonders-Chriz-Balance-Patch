@@ -1,0 +1,24 @@
+name: Verify Bardic Release
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify installer versions and syntax
+        run: python -B tools/verify_installers.py
+      - name: Test resource generation and reversible installation
+        run: python -B -m unittest discover -s tests -t .
