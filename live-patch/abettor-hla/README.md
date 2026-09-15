@@ -12,8 +12,9 @@ This is a one-component WeiDU tail patch for an existing Bardic Wonders playthro
 Version **1.1.0** supports the actual generated finite controller and restores a
 missing `LUC0ABET.2DA` Symphony availability row after resource validation. This
 repairs installations where earlier versions skipped Symphony. An existing row
-is preserved; duplicate rows are rejected. Existing self-refresh and later-mod
-visual effects remain intact. See the [compatibility report](../../docs/abettor-component-2004-compatibility.md).
+is preserved; unrecognized table widths, duplicate rows, and unexpected Symphony
+allowance or prerequisite values are rejected with rollback. Existing self-refresh
+and later-mod visual effects remain intact. See the [compatibility report](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/blob/master/docs/abettor-component-2004-compatibility.md).
 
 ## Safety requirements
 

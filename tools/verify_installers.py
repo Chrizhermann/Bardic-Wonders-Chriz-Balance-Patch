@@ -10,6 +10,25 @@ MAIN_VERSION = "v2.9c-balance.5"
 TAIL_VERSION = "1.1.0"
 
 
+def parse_installer(path: Path, directory: Path) -> None:
+    log = directory / "parse.log"
+    # WeiDU can report a fatal parse error with exit code zero. Remove the prior
+    # log so an earlier successful parse can never satisfy the success check.
+    log.unlink(missing_ok=True)
+    result = subprocess.run(
+        [str(ROOT / "Setup-BardicWonders.exe"), "--no-auto-tp2", "--noautoupdate",
+         "--no-exit-pause", "--nogame", "--parse-check", path.suffix[1:].upper(),
+         str(path), "--log", str(log)],
+        cwd=directory, text=True, capture_output=True, check=False, timeout=30,
+    )
+    output = result.stdout + "\n" + result.stderr
+    if log.exists():
+        output += "\n" + log.read_text(encoding="utf-8", errors="replace")
+    if (result.returncode or "was successfully parsed" not in output
+            or re.search(r"\b(?:FATAL|ERROR)\b", output, re.IGNORECASE)):
+        raise SystemExit(f"Parse failed: {path}\n{output}")
+
+
 def main() -> None:
     main_tp2 = ROOT / "BardicWonders/Setup-BardicWonders.tp2"
     tail_tp2 = ROOT / "live-patch/abettor-hla/Setup-AbettorHLARebalance.tp2"
@@ -25,14 +44,7 @@ def main() -> None:
     files += sorted((ROOT / "live-patch/abettor-hla/abettor-hla-rebalance/lib").glob("*.tpa"))
     with tempfile.TemporaryDirectory(prefix="bardic-parse-") as directory:
         for path in files:
-            result = subprocess.run(
-                [str(ROOT / "Setup-BardicWonders.exe"), "--no-auto-tp2", "--noautoupdate",
-                 "--no-exit-pause", "--nogame", "--parse-check", path.suffix[1:].upper(),
-                 str(path), "--log", str(Path(directory) / "parse.log")],
-                cwd=directory, text=True, capture_output=True, check=False, timeout=30,
-            )
-            if result.returncode:
-                raise SystemExit(f"Parse failed: {path.relative_to(ROOT)}\n{result.stdout}\n{result.stderr}")
+            parse_installer(path, Path(directory))
     print(f"INSTALLER_VERIFICATION=PASS versions={MAIN_VERSION}/{TAIL_VERSION} syntax_checks={len(files)}")
 
 

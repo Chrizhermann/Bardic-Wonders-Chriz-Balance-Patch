@@ -276,15 +276,19 @@ class TailPatchIntegrationTests(unittest.TestCase):
     def test_current_generated_resources_restore_skipped_hla_and_uninstall_exactly(self) -> None:
         from .generated_fixture import generated_resources
         from .test_weidu_finite_integration import HLA_TABLE
-        for projectile, payload in ((444, "X6SONG"), (913, "QZNEW02")):
+        for projectile, payload, columns in ((444, "X6SONG", 9), (913, "QZNEW02", 10)):
             with self.subTest(projectile=projectile), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 self.make_fixture(root, payload_resref=payload)
                 generated_resources(root, payload, projectile)
                 override = root / "override"
-                (override / "LUC0ABET.2DA").write_text("\n".join(
+                table = "\n".join(
                     line for line in HLA_TABLE.splitlines() if "AP_C0ABETHL" not in line
-                ) + "\n")
+                ) + "\n"
+                if columns == 10:
+                    table = table.replace("EXCLUDED_BY", "EXCLUDED_BY ALIGNMENT_RESTRICT")
+                    table = table.replace("*             *", "*             * *")
+                (override / "LUC0ABET.2DA").write_text(table)
                 before = {p.name: p.read_bytes() for p in override.iterdir()}
                 install = self.weidu(root, "install")
                 self.assertEqual(0, install.returncode, install.stdout + install.stderr)
@@ -302,6 +306,30 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 uninstall = self.weidu(root, "uninstall")
                 self.assertEqual(0, uninstall.returncode, uninstall.stdout + uninstall.stderr)
                 self.assertEqual(before, {p.name: p.read_bytes() for p in override.iterdir()})
+
+    def test_invalid_hla_tables_roll_back_all_resources(self) -> None:
+        from .test_weidu_finite_integration import HLA_TABLE
+        missing = "\n".join(line for line in HLA_TABLE.splitlines() if "AP_C0ABETHL" not in line) + "\n"
+        cases = {
+            "unsupported_width": missing.replace("EXCLUDED_BY", "EXCLUDED_BY EXTRA EXTRA2").replace("99         1            *             *", "99         1            *             * * *"),
+            "wrong_prerequisite": HLA_TABLE.replace("AP_C0ABETT5   *", "AP_OTHER     *"),
+            "wrong_allowance": HLA_TABLE.replace("1            AP_C0ABETT5", "2            AP_C0ABETT5"),
+            "duplicate": HLA_TABLE + "C0ABET3 AP_C0ABETHL * * 1 99 1 AP_C0ABETT5 *\n",
+        }
+        for case, table in cases.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root)
+                override = root / "override"
+                (override / "LUC0ABET.2DA").write_text(table, encoding="ascii")
+                before = {p.name: p.read_bytes() for p in override.iterdir()}
+                before_tlk = tlk_entries(root / "dialog.tlk")
+                before_components = component_ids(root / "WeiDU.log")
+                install = self.weidu(root, "install")
+                self.assertNotEqual(0, install.returncode, install.stdout + install.stderr)
+                self.assertEqual(before, {p.name: p.read_bytes() for p in override.iterdir()})
+                self.assertEqual(before_tlk, tlk_entries(root / "dialog.tlk")[:len(before_tlk)])
+                self.assertEqual(before_components, component_ids(root / "WeiDU.log"))
 
     def test_install_uses_dynamic_payload_and_uninstall_restores_exact_hashes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

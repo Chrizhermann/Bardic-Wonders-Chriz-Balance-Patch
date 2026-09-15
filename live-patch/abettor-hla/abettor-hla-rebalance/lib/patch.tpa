@@ -1707,6 +1707,9 @@ ACTION_IF FILE_EXISTS_IN_GAME ~LUC0ABET.2DA~ BEGIN
   INCLUDE ~abettor-hla-rebalance/lib/hla_actions.tpa~
   COPY_EXISTING ~LUC0ABET.2DA~ ~override~
     COUNT_2DA_COLS hla_columns
+    PATCH_IF (hla_columns != 9) AND (hla_columns != 10) BEGIN
+      PATCH_FAIL ~Unrecognized Abettor HLA table width; rolling back this component.~
+    END
     COUNT_2DA_ROWS hla_columns hla_rows
     SET symphony_rows = 0
     FOR (hla_row = 0; hla_row < hla_rows; ++hla_row) BEGIN
@@ -1722,6 +1725,25 @@ ACTION_IF FILE_EXISTS_IN_GAME ~LUC0ABET.2DA~ BEGIN
       END
     END ELSE PATCH_IF (symphony_rows > 1) BEGIN
       PATCH_FAIL ~Duplicate Symphony HLA rows were found; rolling back this component.~
+    END
+    // The helper only supports the recognized table widths. Verify the result
+    // rather than treating its return as proof that the HLA became available.
+    COUNT_2DA_ROWS hla_columns hla_rows
+    SET symphony_rows = 0
+    FOR (hla_row = 0; hla_row < hla_rows; ++hla_row) BEGIN
+      READ_2DA_ENTRY hla_row 1 hla_columns hla_ability
+      PATCH_IF (~%hla_ability%~ STRING_EQUAL_CASE ~AP_C0ABETHL~) BEGIN
+        SET symphony_rows += 1
+        READ_2DA_ENTRY hla_row 6 hla_columns hla_allowed
+        READ_2DA_ENTRY hla_row 7 hla_columns hla_prerequisite
+        PATCH_IF !(~%hla_allowed%~ STRING_EQUAL ~1~)
+          OR !(~%hla_prerequisite%~ STRING_EQUAL_CASE ~AP_C0ABETT5~) BEGIN
+          PATCH_FAIL ~Unrecognized Symphony HLA allowance or prerequisite; rolling back this component.~
+        END
+      END
+    END
+    PATCH_IF (symphony_rows != 1) BEGIN
+      PATCH_FAIL ~Symphony HLA restoration failed validation; rolling back this component.~
     END
   BUT_ONLY
 END
