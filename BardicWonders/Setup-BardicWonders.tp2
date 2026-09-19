@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/BardicWonders~
 AUTHOR ~The Artisan (artisans-corner.com)~
-VERSION ~v2.9c-balance.5~
+VERSION ~v2.9c-balance.6~
 AUTO_TRA ~%MOD_FOLDER%/translations/%s~
 ALWAYS
   INCLUDE ~%MOD_FOLDER%/lib/a7#add_kit_ex.tpa~
@@ -123,3 +123,10 @@ BEGIN ~Bardic Wonders: Patch Dialogue Class Checks for: Gallant, Mage/Bard and F
 GROUP ~Tweaks & Patches~
 REQUIRE_PREDICATE (MOD_IS_INSTALLED ~BardicWonders/BardicWonders.tp2~ ~2009~) OR (MOD_IS_INSTALLED ~BardicWonders/BardicWonders.tp2~ ~1012~) ~Mage/Bard and Fighter/Mage/Bard component must be installed.~
 INCLUDE ~%MOD_FOLDER%/LIB/mage_bard_dlg.tpa~
+
+BEGIN ~Bardic Wonders: Kit-specific bard spell progression (EEex; install late)~ DESIGNATED 3010
+LABEL ~bw_kit_spell_progression~
+GROUP ~Tweaks & Patches~
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) ~This component requires EEex.~
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~CBRSPVER.2DA~) ~Install chriz-bg-rebalance's kit spell progression core first.~
+INCLUDE ~%MOD_FOLDER%/lib/bard_progression.tpa~

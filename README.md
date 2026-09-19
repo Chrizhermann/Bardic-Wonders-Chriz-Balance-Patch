@@ -69,6 +69,51 @@ invisibility tracked in issue #5. The Darkbloom Spell Revisions exclusion still 
 
 ## Installation
 
+Version **v2.9c-balance.6** adds optional component **3010 — Kit-specific bard
+spell progression** using the EEex-based progression provider from
+[chriz-bg-rebalance v0.5.0](https://github.com/Chrizhermann/chriz-bg-rebalance/releases/tag/v0.5.0).
+Install its
+component **420** (provider), then install this component after the desired
+Bardic Wonders kits and description-changing tweaks. For the collection's
+complete Bard policy, use **420 → 421 → 3010**. Standalone users can use
+**420 → 3010** and retain their chosen progression for ordinary Bards and
+native Bard kits; component **421** is optional.
+This requires the provider's supported Windows game/EEex build; it is not a
+standalone replacement for EEex and has no non-EEex fallback.
+
+| Bardic Wonders kit | Base spell progression |
+|---|---|
+| Dancer | Original Baldur's Gate curve, through spell level 6 |
+| Kapellmeister, Darkbloom | Icewind Dale curve, through spell level 8 |
+| Abettor, Storm Drummer, Troubadour, Deathsinger, Strategist | Icewind Dale curve, through spell level 7 |
+
+Optional base policy **421** gives Blade and Skald the original curve through spell level 6,
+and the ordinary Bard and Jester the Icewind Dale curve through spell level 7.
+The Icewind Dale curve unlocks spell level 7 at Bard level 21 and spell level 8
+at Bard level 29. Existing kit modifiers remain: Dancer's spell-slot penalty,
+Kapellmeister's two bonus slots, Darkbloom's bonus slot, and Skald's early
+casting delay and caster-level penalty. Special abilities such as Kapellmeister's
+Song of Universal Harmony retain their separate spell access.
+
+Component 3010 registers only installed, supported kits and updates their
+in-game descriptions. Native-kit description notes are refreshed only when
+their registered progression matches that note. It does not change Mage/Bard
+multiclasses or Gallant.
+The shared engine hook is supplied once by chriz-bg-rebalance, rather than copied
+into this fork. **Darkbloom is optional:** when absent, it is skipped; when
+installed, it receives the eighth-level progression and keeps its existing
+bonus spell slot. Its presence does not change the other kits' mappings.
+The progression component imposes no Spell Revisions restriction. The separate
+Darkbloom warning above concerns its imported spells, which this component does
+not repair; it does not prevent using the progression component without
+Darkbloom. The user reported a successful BG2:EE/EET 2.7.3 live smoke test on
+20 September 2026. IWDEE 2.7.3 support has executable and installer verification;
+an IWDEE in-game check remains. These checks do not independently verify
+Darkbloom's imported spell behavior.
+
+See the [v2.9c-balance.6 release notes](docs/releases/v2.9c-balance.6.md) for
+installation and verification details.
+
 For a fresh or future installation, use this fork as the Bardic Wonders mod and
 select the desired kit components. Shared HLA changes require **High Level
 Abilities** (component `2007`). For Abettor's Symphony, install both **Abettor of
