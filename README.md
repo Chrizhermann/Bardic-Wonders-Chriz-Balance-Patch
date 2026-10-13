@@ -183,6 +183,9 @@ development branch now implements the follow-up; see
   the installation lacks them.
 - Each copy refreshes itself the way its source spell does, instead of
   stacking with its own earlier casts.
+- The Troubadour, Darkbloom and Deathsinger descriptions name each granted
+  spell as installed, so they match Spell Revisions' names and the game's
+  language.
 - New Bard Spells reach the Gallant whichever of the two components is
   installed second.
 - Install-and-uninstall fixtures check spell identity, mechanics, type, level,

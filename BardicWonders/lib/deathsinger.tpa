@@ -3,6 +3,30 @@ COPY ~%MOD_FOLDER%/deathsinger~ ~override~
 COPY_EXISTING ~LUBA0.2DA~ ~OVERRIDE/LUC0DEAT.2DA~
   REPLACE_TEXTUALLY ~AP_SPCL920~ ~AP_C0DESPHL~
 
+// Kit description. Each <RESREF> placeholder becomes the installed name of
+// that granted spell once the spells are copied (C0_BW_NAME_KIT_SPELLS).
+OUTER_SET c0_des_help = RESOLVE_STR_REF(~DEATHSINGER: A morbid class of bards, deathsingers take pleasure in singing tales of the macabre, and their magical songs are capable of raising the dead from their graves.
+
+Advantages:
+– The Deathsinger's Bard Song, "Call of the Grave", does not assist allies. Instead, the deathsinger may summon undead creatures under <PRO_HISHER> control. While singing, the Deathsinger takes a -4 penalty to Armor Class. Each round while the Deathsinger sings, there is a 35% base chance plus 2% for each level of the Deathsinger that a skeleton will answer the call, up to a maximum of 75% at level 20. Any summoned skeletons will be destroyed if the Deathsinger stops singing. The strength and maximum amount of skeletons summoned increases with level.
+   1st – 5th level: Summons up to two skeletons with 3 HD.
+   6th – 11th level: Summons up to three skeletons with up to 5 HD.
+   12th – 17th level: Summons up to four skeletons with up to 7 HD.
+   18th level: Summons up to five skeletons with up to 9 HD.
+
+– Gains the following spells as mage spells:
+   1st level: <C0DESP1>
+   2nd level: <C0DESP2>
+   3rd level: <C0DESP3>
+   4th level: <C0DESP4>
+   5th level: <C0DESP5>
+   6th level: <C0DESP6>
+
+Disadvantages:
+– Incurs a -4 penalty to Charisma.
+– May not be good-aligned.
+– Only has one-quarter Pick Pockets percentage.~)
+
 LAF ADD_KIT_EX
   INT_VAR
     // Mage	= 1
@@ -32,27 +56,7 @@ LAF ADD_KIT_EX
 	
     lower         = RESOLVE_STR_REF(~deathsinger~)
 	
-    help          = RESOLVE_STR_REF(~DEATHSINGER: A morbid class of bards, deathsingers take pleasure in singing tales of the macabre, and their magical songs are capable of raising the dead from their graves.
-
-Advantages:
-– The Deathsinger's Bard Song, "Call of the Grave", does not assist allies. Instead, the deathsinger may summon undead creatures under <PRO_HISHER> control. While singing, the Deathsinger takes a -4 penalty to Armor Class. Each round while the Deathsinger sings, there is a 35% base chance plus 2% for each level of the Deathsinger that a skeleton will answer the call, up to a maximum of 75% at level 20. Any summoned skeletons will be destroyed if the Deathsinger stops singing. The strength and maximum amount of skeletons summoned increases with level.
-   1st – 5th level: Summons up to two skeletons with 3 HD.
-   6th – 11th level: Summons up to three skeletons with up to 5 HD.
-   12th – 17th level: Summons up to four skeletons with up to 7 HD.
-   18th level: Summons up to five skeletons with up to 9 HD.
-
-– Gains the following spells as mage spells:
-   1st level: Doom
-   2nd level: Death Armor
-   3rd level: Bestow Curse
-   4th level: Cloak of Fear
-   5th level: Slay Living
-   6th level: Destruction
-
-Disadvantages:
-– Incurs a -4 penalty to Charisma.
-– May not be good-aligned.
-– Only has one-quarter Pick Pockets percentage.~)
+    help          = c0_des_help
 	
     briefdesc     = RESOLVE_STR_REF(~DEATHSINGER: A morbid class of bards, deathsingers take pleasure in singing tales of the macabre, and their magical songs are capable of raising the dead from their graves.~)
 	
@@ -224,6 +228,11 @@ Area of Effect: 1 creature
 Saving Throw: Neg.
 
 The caster touches the target creature with a hand infused with necromantic energy. The target creature must make a Save vs. Death at -2 or die instantly. A successful save still results in the target taking 10d6 points of magical damage.~
+
+// Name the granted spells in the kit description: Spell Revisions renames
+// some of them, and every game language has its own names.
+ACTION_DEFINE_ARRAY c0_des_kit_spells BEGIN C0DESP1 C0DESP2 C0DESP3 C0DESP4 C0DESP5 C0DESP6 END
+LAF C0_BW_NAME_KIT_SPELLS INT_VAR description = c0_des_help STR_VAR spells = c0_des_kit_spells END
 
 COPY_EXISTING ~C0DESP7.spl~ ~override/C0DESP7.spl~
 LPF ALTER_EFFECT

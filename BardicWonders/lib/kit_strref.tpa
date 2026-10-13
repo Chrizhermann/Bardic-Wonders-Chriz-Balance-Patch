@@ -34,3 +34,60 @@ ACTION_FOR_EACH CLASSTEXT IN BGCLATXT CLASTEXT SODCLTXT BEGIN
 	
   END
 END
+
+// Name the spells a kit grants in its own description. Spell Revisions and
+// other mods rename or replace priest spells, and every game language names
+// them differently, so each <RESREF> placeholder in the description becomes
+// the name of that installed copy (SPL offset 0x08). description must be the
+// calling component's own new string: it is changed in place, so every table
+// that shows it follows, and WeiDU restores it on uninstall. spells names an
+// array of the copies' resrefs; call this after the copies are final.
+DEFINE_ACTION_FUNCTION C0_BW_NAME_KIT_SPELLS
+  INT_VAR description = 0 - 1
+  STR_VAR spells = ~~
+BEGIN
+  ACTION_IF (description <= 0 OR description >= NEXT_STRREF) BEGIN
+    FAIL ~Bardic Wonders: %description% is not a kit description string.~
+  END
+  OUTER_PATCH ~~ BEGIN
+    GET_STRREF description c0_kit_text
+  END
+  ACTION_PHP_EACH ~%spells%~ AS c0_kit_index => c0_kit_spell BEGIN
+    ACTION_TO_UPPER c0_kit_spell
+    OUTER_SET c0_kit_placeholder = 0 - 1
+    OUTER_PATCH ~%c0_kit_text%~ BEGIN
+      SET c0_kit_placeholder = INDEX_BUFFER (CASE_SENSITIVE EXACT_MATCH ~<%c0_kit_spell%>~)
+    END
+    ACTION_IF (c0_kit_placeholder < 0) BEGIN
+      FAIL ~Bardic Wonders: the kit description has no <%c0_kit_spell%> placeholder.~
+    END
+    ACTION_IF NOT FILE_EXISTS_IN_GAME ~%c0_kit_spell%.SPL~ BEGIN
+      FAIL ~Bardic Wonders: %c0_kit_spell%.SPL does not exist, so the kit description cannot name it.~
+    END
+    OUTER_SET c0_kit_name_ref = 0 - 1
+    COPY_EXISTING ~%c0_kit_spell%.SPL~ ~override~
+      PATCH_IF (BUFFER_LENGTH >= 0x0c) BEGIN
+        READ_LONG 0x08 c0_kit_name_ref
+      END
+    BUT_ONLY
+    // Strref 0 is the TLK's reserved "no text" entry.
+    OUTER_SPRINT c0_kit_name ~~
+    ACTION_IF (c0_kit_name_ref > 0 AND c0_kit_name_ref < NEXT_STRREF) BEGIN
+      OUTER_PATCH ~~ BEGIN
+        GET_STRREF c0_kit_name_ref c0_kit_name
+      END
+    END
+    OUTER_SET c0_kit_named = 0
+    OUTER_PATCH ~%c0_kit_name%~ BEGIN
+      SET c0_kit_named = (INDEX_BUFFER (~[^ %TAB%%LNL%%MNL%]~) >= 0)
+    END
+    ACTION_IF NOT c0_kit_named BEGIN
+      WARN ~Bardic Wonders: %c0_kit_spell%.SPL has no name, so the kit description shows its file name.~
+      OUTER_SPRINT c0_kit_name ~%c0_kit_spell%~
+    END
+    OUTER_PATCH_SAVE c0_kit_text ~%c0_kit_text%~ BEGIN
+      REPLACE_TEXTUALLY CASE_SENSITIVE EXACT_MATCH ~<%c0_kit_spell%>~ ~%c0_kit_name%~
+    END
+  END
+  STRING_SET_EVALUATE description ~%c0_kit_text%~
+END

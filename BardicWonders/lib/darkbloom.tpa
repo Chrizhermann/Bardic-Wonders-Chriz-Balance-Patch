@@ -4,6 +4,33 @@ COPY ~%MOD_FOLDER%/darkbloom~ ~override~
 COPY_EXISTING ~LUBA0.2DA~ ~OVERRIDE/LUC0BDD.2DA~
   REPLACE_TEXTUALLY ~AP_SPCL920~ ~AP_C0BDDHL~
 
+// Kit description. Each <RESREF> placeholder becomes the installed name of
+// that granted spell once the spells are copied (C0_BW_NAME_KIT_SPELLS).
+OUTER_SET c0_bdd_help = RESOLVE_STR_REF(~DARKBLOOM BARD: Rarely seen in the Realms, Darkbloom Bards are recognized for their skills in using the powers of nature. Unlike druids, however, Darkbloom Bards appear to twist the beauty of flora and fauna into wicked and twisted visions—the stuff of eldritch dreams and nightmares. While some believe these are borne of the alien fantasies of practitioners, others fear that Darkbloom Bards are, in fact, drawing upon pieces of otherworldly aberrations that are attempting to infiltrate the waking world.
+
+ADVANTAGES: 
+
+– +15 bonus to Lore.
+– +5% bonus to Magic Resistance.
+– Receives one additional spell slot per spell level.
+– +2 bonus to Armor Class vs Spectral Undead, Shadows, Myconids, Shambling Mounds, Shriekers, Slimes and Spectres.
+– Receives the following druidic spells, which are automatically scribed into their spellbook: <C0BDDS1>, <C0BDDS2>, <C0BDDS3>, <C0BDDS4>, <C0BDDS5>, <C0BDDS6>, <C0BDDS7>.
+
+– The Darkbloom Bard's song, "Silence of Dreamrealm's Bog", inflicts Silence upon all surrounding creatures, both friendly and hostile, as well as reducing Magic Resistance by 10% plus an additional 2% per two levels, up to a maximum of 50%. All creatures may make a Saving Throw vs. Spells at +2 (-1 modifier per 6 levels) to avoid being Silenced.
+
+– 6th level: May use Dark Entanglement once per day.
+
+DARK ENTANGLEMENT: By means of this spell, the caster is able to cause dark plants and roots in the area of effect to entangle creatures within the area. Once per round, a creature can attempt to make a Saving Throw vs. Spell with a +3 bonus to avoid entanglement. An entangled creature can still attack but receives a -2 penalty to its Armor Class and -10% to Magic Resistance. There is 10% chance upon entanglement that the creature will be poisoned and suffer 1 damage per second for 5 seconds.
+
+– 12th level: May Backstab at x2 damage, additionally dealing 2d8 acid damage. There is also a 50% chance that the victim will be Entangled by dark vines for one round.
+
+DISADVANTAGES:
+
+– Incurs a -2 penalty to Strength and Constitution and a -4 penalty to Charisma.
+– Incurs a -1 penalty to all Saving Throws.
+– Only has one-quarter Pick Pockets percentage.
+– May only be of True Neutral and Neutral Evil alignment.~)
+
 LAF ADD_KIT_EX
   INT_VAR
     // Mage	= 1
@@ -33,30 +60,7 @@ LAF ADD_KIT_EX
 	
     lower         = RESOLVE_STR_REF(~darkbloom bard~)
 	
-    help          = RESOLVE_STR_REF(~DARKBLOOM BARD: Rarely seen in the Realms, Darkbloom Bards are recognized for their skills in using the powers of nature. Unlike druids, however, Darkbloom Bards appear to twist the beauty of flora and fauna into wicked and twisted visions—the stuff of eldritch dreams and nightmares. While some believe these are borne of the alien fantasies of practitioners, others fear that Darkbloom Bards are, in fact, drawing upon pieces of otherworldly aberrations that are attempting to infiltrate the waking world.
-
-ADVANTAGES: 
-
-– +15 bonus to Lore.
-– +5% bonus to Magic Resistance.
-– Receives one additional spell slot per spell level.
-– +2 bonus to Armor Class vs Spectral Undead, Shadows, Myconids, Shambling Mounds, Shriekers, Slimes and Spectres.
-– Receives the following druidic spells, which are automatically scribed into their spellbook: Curse, Beast Claw, Mold Touch, Thorn Spray, Insect Plague, Fire Seeds, Mist of Eldath.
-
-– The Darkbloom Bard's song, "Silence of Dreamrealm's Bog", inflicts Silence upon all surrounding creatures, both friendly and hostile, as well as reducing Magic Resistance by 10% plus an additional 2% per two levels, up to a maximum of 50%. All creatures may make a Saving Throw vs. Spells at +2 (-1 modifier per 6 levels) to avoid being Silenced.
-
-– 6th level: May use Dark Entanglement once per day.
-
-DARK ENTANGLEMENT: By means of this spell, the caster is able to cause dark plants and roots in the area of effect to entangle creatures within the area. Once per round, a creature can attempt to make a Saving Throw vs. Spell with a +3 bonus to avoid entanglement. An entangled creature can still attack but receives a -2 penalty to its Armor Class and -10% to Magic Resistance. There is 10% chance upon entanglement that the creature will be poisoned and suffer 1 damage per second for 5 seconds.
-
-– 12th level: May Backstab at x2 damage, additionally dealing 2d8 acid damage. There is also a 50% chance that the victim will be Entangled by dark vines for one round.
-
-DISADVANTAGES:
-
-– Incurs a -2 penalty to Strength and Constitution and a -4 penalty to Charisma.
-– Incurs a -1 penalty to all Saving Throws.
-– Only has one-quarter Pick Pockets percentage.
-– May only be of True Neutral and Neutral Evil alignment.~)
+    help          = c0_bdd_help
 	
     briefdesc     = RESOLVE_STR_REF(~DARKBLOOM BARD: Rarely seen in the Realms, Darkbloom Bards are recognized for their skills in using the powers of nature. Unlike druids, however, Darkbloom Bards appear to twist the beauty of flora and fauna into wicked and twisted visions—the stuff of eldritch dreams and nightmares. While some believe these are borne of the alien fantasies of practitioners, others fear that Darkbloom Bards are, in fact, drawing upon pieces of otherworldly aberrations that are attempting to infiltrate the waking world.~)
 	
@@ -392,3 +396,8 @@ Saving Throw: None
 
 This spell blankets the area of effect with a silver-blue mist—any creature within the mist will be cured of disease and poison and healed 25 Hit Points.~
 END
+
+// Name the granted spells in the kit description: Spell Revisions renames
+// some of them, and every game language has its own names.
+ACTION_DEFINE_ARRAY c0_bdd_kit_spells BEGIN C0BDDS1 C0BDDS2 C0BDDS3 C0BDDS4 C0BDDS5 C0BDDS6 C0BDDS7 END
+LAF C0_BW_NAME_KIT_SPELLS INT_VAR description = c0_bdd_help STR_VAR spells = c0_bdd_kit_spells END
