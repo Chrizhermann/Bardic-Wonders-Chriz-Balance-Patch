@@ -135,7 +135,7 @@ class PriestSpellImportTests(unittest.TestCase):
         copy_libraries(mod, "priest_spell_import.tpa")
         actions = (
             section(MOD / "lib" / "troubadour.tpa", "// Priest spells granted by the kit table.",
-                    "COPY ~%MOD_FOLDER%/troubadour/c0trbhl.spl~")
+                    "// Name the granted spells in the kit description")
             + section(MOD / "lib" / "deathsinger.tpa", "// Priest spells granted by the kit table.",
                       "COPY ~%MOD_FOLDER%/DEATHSINGER/C0DESP2.SPL~")
             + section(MOD / "lib" / "deathsinger.tpa", "// Cloak of Fear and Slay Living",

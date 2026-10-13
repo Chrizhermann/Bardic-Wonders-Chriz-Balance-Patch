@@ -95,7 +95,7 @@ no IWD:EE installation was checked.
 From the repository root:
 
 ```powershell
-python -B -m unittest tests.test_priest_spell_imports tests.test_darkbloom_spell_imports tests.test_gallant_new_spells -v
+python -B -m unittest tests.test_priest_spell_imports tests.test_darkbloom_spell_imports tests.test_gallant_new_spells tests.test_kit_spell_names -v
 python -B -m unittest discover -s tests -t . -v
 python -B -m tools.verify_installers
 ```
@@ -106,22 +106,46 @@ self-references, unrelated spells in Darkbloom's old files), IWD-like and
 mixed layouts; spell name, mechanics, type, level and kit availability;
 byte-exact fallbacks; failures that roll back; reinstall; byte-exact uninstall;
 both Gallant install orders with each component reinstalled or removed; and
-unchanged unrelated tables and kit rows. They do not run the game.
+unchanged unrelated tables and kit rows. The kit-description tests run the
+three production descriptions and name calls on copies whose names are
+vanilla, Spell Revisions-like, translated, added in the same component, or
+missing. They do not run the game.
 
-## Open question
+On 14 October 2026 the production descriptions, spell copies and name calls
+also ran in temporary games built from files copied out of two test
+installations: EET without Spell Revisions, and EET with Spell Revisions and
+IWDification. Without Spell Revisions the descriptions list the spells as
+before. With it, the Troubadour lists Cure Serious Wounds and Cure Critical
+Wounds at levels 3 and 4 and Darkbloom lists Healing Mist. With the German
+string table shipped in the first installation, the imported spells are listed
+by their German names.
+
+## Kit descriptions
 
 Under Spell Revisions, `CLERIC_CURE_MEDIUM_WOUNDS` and
 `CLERIC_CURE_SERIOUS_WOUNDS` are named Cure Serious Wounds and Cure Critical
-Wounds. The Troubadour therefore gets those spells at levels 3 and 4, while
-the kit description lists Cure Medium Wounds and Cure Serious Wounds.
-Likewise, Darkbloom's seventh-level copy is named Healing Mist in the two
-inspected installations, while its kit description lists Mist of Eldath.
-Options: fill the descriptions' spell names from the installed spells, describe
-the grants generically, or leave the text as is.
+Wounds, and Darkbloom's seventh-level copy is named Healing Mist in the two
+inspected installations. The descriptions used to list fixed English names.
+Decided on 14 October 2026: they name the spells as installed.
+
+- The Troubadour, Darkbloom and Deathsinger descriptions have a `<RESREF>`
+  placeholder for each granted spell, such as `<C0TRBS3>`.
+- Once the copies are final, `C0_BW_NAME_KIT_SPELLS` (`lib/kit_strref.tpa`)
+  replaces each placeholder with that copy's name (SPL offset 0x08). It
+  changes the component's own description string in place, so every table
+  that shows it follows, and WeiDU restores the string on uninstall.
+- Imported spells are listed by their names in the installed game's language.
+  Bardic Wonders' bundled spells, and the rest of the description, are in
+  English.
+- A copy without a usable name (no string, string 0 or empty text) is listed
+  by its file name, with a warning.
+- A reinstall in one WeiDU run gives the description a new string; the earlier
+  one gets its placeholder text back and is no longer used.
 
 ## Not changed
 
 - In-game behavior is unverified, including a Spell Revisions game.
+- The Troubadour's brief description still repeats the Abettor of Mask text.
 - Gallant copies (`C0GA*`) still name the bard spells in their identity
   effects, as the Heroism handoff also notes for `C0GA202` and `C0GA502`, so
   a Gallant's recast can stack with its earlier cast. Battleluck's Gallant copy

@@ -167,7 +167,8 @@ class DarkbloomSpellImportTests(unittest.TestCase):
         copy_libraries(mod, "priest_spell_import.tpa")
         source = MOD / "lib" / "darkbloom.tpa"
         actions = (section(source, "COPY ~%MOD_FOLDER%/darkbloom~ ~override~", "COPY_EXISTING ~LUBA0.2DA~")
-                   + section(source, "// Druidic spells."))
+                   + section(source, "// Druidic spells.",
+                             "// Name the granted spells in the kit description"))
         self.assertNotRegex(actions, r"COPY_EXISTING ~SPPR")
         (root / "test.tp2").write_text(
             "BACKUP ~BardicWonders/backup~\nAUTHOR ~test~\n"
