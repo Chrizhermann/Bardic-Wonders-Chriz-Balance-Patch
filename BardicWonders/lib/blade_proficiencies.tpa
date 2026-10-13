@@ -1,0 +1,122 @@
+// Own only Blade's named weapon caps, its manual Two-Weapon Style cap, and
+// SET grants of that style in the private CLAB spell copied by blade.tpa.
+// Do not alter proficiency budgets, bonus/APR tables, other styles or saves.
+COPY_EXISTING ~WEAPPROF.2DA~ ~override~
+  COUNT_2DA_COLS bw_columns
+  SET bw_header_columns = bw_columns - 1
+  SET bw_blade_column = 0
+  SET bw_id_column = 0
+  FOR (bw_column = 0; bw_column < bw_header_columns; ++bw_column) BEGIN
+    READ_2DA_ENTRY 0 bw_column bw_header_columns bw_name
+    PATCH_IF (~%bw_name%~ STRING_EQUAL_CASE ~BLADE~) BEGIN
+      PATCH_IF bw_blade_column BEGIN
+        PATCH_FAIL ~Blade proficiencies: WEAPPROF.2DA has duplicate BLADE columns.~
+      END
+      SET bw_blade_column = bw_column + 1
+    END
+    PATCH_IF (~%bw_name%~ STRING_EQUAL_CASE ~ID~) BEGIN
+      PATCH_IF bw_id_column BEGIN
+        PATCH_FAIL ~Blade proficiencies: WEAPPROF.2DA has duplicate ID columns.~
+      END
+      SET bw_id_column = bw_column + 1
+    END
+  END
+  PATCH_IF (!bw_blade_column OR !bw_id_column) BEGIN
+    PATCH_FAIL ~Blade proficiencies: WEAPPROF.2DA needs BLADE and ID columns.~
+  END
+
+  // IDs distinguish active EE AXE/SPEAR rows from the legacy BG1 groups
+  // with the same labels (IDs 6 and 3). These are engine proficiency IDs,
+  // not row positions or dynamically allocated kit IDs.
+  DEFINE_ASSOCIATIVE_ARRAY bw_blade_groups BEGIN
+    BASTARDSWORD => 89
+    LONGSWORD => 90
+    SHORTSWORD => 91
+    AXE => 92
+    TWOHANDEDSWORD => 93
+    KATANA => 94
+    SCIMITARWAKISASHININJATO => 95
+    DAGGER => 96
+    SPEAR => 98
+    HALBERD => 99
+    2WEAPON => 114
+  END
+  COUNT_2DA_ROWS bw_columns bw_rows
+  PATCH_PHP_EACH bw_blade_groups AS bw_group => bw_id BEGIN
+    SET bw_matches = 0
+    FOR (bw_row = 0; bw_row < bw_rows; ++bw_row) BEGIN
+      READ_2DA_ENTRY bw_row 0 bw_columns bw_label
+      READ_2DA_ENTRY bw_row bw_id_column bw_columns bw_row_id
+      PATCH_IF ((~%bw_label%~ STRING_EQUAL_CASE ~%bw_group%~) AND
+                (IS_AN_INT ~%bw_row_id%~)) BEGIN
+        PATCH_IF (bw_row_id = bw_id) BEGIN
+          SET bw_matches += 1
+          SET bw_target_row = bw_row
+        END
+      END
+    END
+    PATCH_IF (bw_matches != 1) BEGIN
+      PATCH_FAIL ~Blade proficiencies: WEAPPROF.2DA needs one unambiguous %bw_group% row with ID %bw_id%; found %bw_matches%.~
+    END
+    PATCH_IF (bw_id = 114) BEGIN
+      SET_2DA_ENTRY bw_target_row bw_blade_column bw_columns 0
+    END ELSE BEGIN
+      SET_2DA_ENTRY bw_target_row bw_blade_column bw_columns 2
+    END
+  END
+  BUT_ONLY
+
+COPY_EXISTING ~C0BLD00.SPL~ ~override~
+  PATCH_IF (SOURCE_SIZE < 0x72) BEGIN
+    PATCH_FAIL ~Blade proficiencies: C0BLD00.SPL has a truncated spell header.~
+  END
+  READ_ASCII 0 bw_signature (8)
+  PATCH_IF !(~%bw_signature%~ STRING_EQUAL ~SPL V1  ~) BEGIN
+    PATCH_FAIL ~Blade proficiencies: C0BLD00.SPL is not an SPL V1 resource.~
+  END
+  READ_LONG 0x64 bw_abilities
+  READ_SHORT 0x68 bw_ability_count
+  READ_LONG 0x6a bw_effects
+  SET bw_ability_end = bw_abilities + 0x28 * bw_ability_count
+  PATCH_IF (bw_ability_count AND
+            ((bw_abilities < 0x72) OR (bw_ability_end > SOURCE_SIZE))) BEGIN
+    PATCH_FAIL ~Blade proficiencies: C0BLD00.SPL has an invalid ability table.~
+  END
+  SET bw_matches = 0
+  // Visit casting effects and every ability; shared slices are safe to revisit.
+  FOR (bw_header = 0; bw_header <= bw_ability_count; ++bw_header) BEGIN
+    PATCH_IF (bw_header = bw_ability_count) BEGIN
+      READ_SHORT 0x6e bw_first
+      READ_SHORT 0x70 bw_count
+    END ELSE BEGIN
+      SET bw_ability = bw_abilities + 0x28 * bw_header
+      READ_SHORT (bw_ability + 0x1e) bw_count
+      READ_SHORT (bw_ability + 0x20) bw_first
+    END
+    SET bw_slice_start = bw_effects + 0x30 * bw_first
+    SET bw_slice_end = bw_slice_start + 0x30 * bw_count
+    PATCH_IF (bw_count AND
+              ((bw_slice_start < 0x72) OR (bw_slice_end > SOURCE_SIZE) OR
+               (bw_ability_count AND bw_slice_start < bw_ability_end AND
+                bw_slice_end > bw_abilities))) BEGIN
+      PATCH_FAIL ~Blade proficiencies: C0BLD00.SPL has an out-of-bounds or overlapping effect list.~
+    END
+    FOR (bw_index = bw_first; bw_index < bw_first + bw_count; ++bw_index) BEGIN
+      SET bw_effect = bw_effects + 0x30 * bw_index
+      READ_SHORT bw_effect bw_opcode
+      READ_LONG (bw_effect + 8) bw_type
+      // High word zero means SET. Increment grants and other proficiencies
+      // belong to different mechanics and are deliberately preserved.
+      PATCH_IF (bw_opcode = 233 AND bw_type = 114) BEGIN
+        SET bw_matches += 1
+        READ_LONG (bw_effect + 4) bw_amount
+        PATCH_IF (bw_amount > 3) BEGIN
+          WRITE_LONG (bw_effect + 4) 3
+        END
+      END
+    END
+  END
+  PATCH_IF !bw_matches BEGIN
+    PATCH_FAIL ~Blade proficiencies: C0BLD00.SPL has no direct Two-Weapon Style SET grant to cap.~
+  END
+  BUT_ONLY

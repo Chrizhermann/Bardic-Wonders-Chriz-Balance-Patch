@@ -1,0 +1,112 @@
+// Battleluck owns a one-shot, caster-centered, ally-only projectile. Build it
+// from a bundled PRO-sized buffer, not an installed/shared projectile.
+// IESDP: area flags 0x200 bits 6+7 select allies; 16 pixels = 1 foot.
+COPY ~%MOD_FOLDER%/new_spells/pro/C0BW203P.PRO~ ~override/C0BWLCK.PRO~
+  PATCH_IF (BUFFER_LENGTH < 0x300) BEGIN
+    PATCH_FAIL ~Battleluck: truncated bundled projectile template.~
+  END
+  FOR (c0_luck_byte = 8; c0_luck_byte < 0x300; ++c0_luck_byte) BEGIN
+    WRITE_BYTE c0_luck_byte 0
+  END
+  WRITE_SHORT 0x08 3       // Area projectile.
+  WRITE_SHORT 0x0a 255     // Self-target has no travel distance.
+  WRITE_LONG 0x2c 0        // No hit-immediately offset, cone, ray or wall behavior.
+  WRITE_SHORT 0x200 0xc0   // Ally filter; no level-based duration/repetition.
+  WRITE_SHORT 0x204 480
+  WRITE_SHORT 0x206 480    // 30-foot radius.
+  WRITE_BYTE 0x216 1      // One explosion; no delayed trigger.
+  WRITE_BYTE 0x217 255    // No explosion animation.
+  WRITE_SHORT 0x21a 0     // Hardcoded instant/None explosion projectile.
+ADD_PROJECTILE ~override/C0BWLCK.PRO~ ~C0 Battleluck~
+
+DEFINE_PATCH_FUNCTION c0_patch_battleluck
+  INT_VAR party_projectile = 0 luck_icon = 0
+BEGIN
+  PATCH_IF (BUFFER_LENGTH < 0x72) BEGIN
+    PATCH_FAIL ~Battleluck: truncated SPL header.~
+  END
+  READ_ASCII 0 c0_luck_signature (8)
+  PATCH_IF NOT (~%c0_luck_signature%~ STRING_EQUAL ~SPL V1  ~) BEGIN
+    PATCH_FAIL ~Battleluck: expected SPL V1 resource.~
+  END
+  READ_LONG 0x64 c0_luck_abilities
+  READ_SHORT 0x68 c0_luck_ability_count
+  READ_LONG 0x6a c0_luck_effects
+  READ_SHORT 0x6e c0_luck_cast_first
+  READ_SHORT 0x70 c0_luck_cast_count
+  PATCH_IF (c0_luck_abilities < 0x72 OR
+            c0_luck_abilities + 0x28 * c0_luck_ability_count > BUFFER_LENGTH OR
+            c0_luck_effects < 0x72 OR
+            c0_luck_effects + 0x30 * (c0_luck_cast_first + c0_luck_cast_count) > BUFFER_LENGTH) BEGIN
+    PATCH_FAIL ~Battleluck: invalid SPL table bounds.~
+  END
+  SET c0_luck_matched = 0
+  FOR (c0_luck_header = 0; c0_luck_header < c0_luck_ability_count; ++c0_luck_header) BEGIN
+    // Functions below can relocate effect records: reread their table each time.
+    READ_LONG 0x6a c0_luck_effects
+    SET c0_luck_ability = c0_luck_abilities + 0x28 * c0_luck_header
+    READ_SHORT (c0_luck_ability + 0x1e) c0_luck_count
+    READ_SHORT (c0_luck_ability + 0x20) c0_luck_first
+    PATCH_IF (c0_luck_effects + 0x30 * (c0_luck_first + c0_luck_count) > BUFFER_LENGTH) BEGIN
+      PATCH_FAIL ~Battleluck: invalid ability effect bounds.~
+    END
+    SET c0_luck_critical = 0
+    SET c0_luck_miss = 0
+    FOR (c0_luck_i = 0; c0_luck_i < c0_luck_count; ++c0_luck_i) BEGIN
+      SET c0_luck_fx = c0_luck_effects + 0x30 * (c0_luck_first + c0_luck_i)
+      READ_SHORT c0_luck_fx c0_luck_opcode
+      READ_LONG (c0_luck_fx + 8) c0_luck_mode
+      PATCH_IF (c0_luck_mode = 0) BEGIN
+        PATCH_IF (c0_luck_opcode = 301) BEGIN SET c0_luck_critical += 1 END
+        PATCH_IF (c0_luck_opcode = 362) BEGIN SET c0_luck_miss += 1 END
+      END
+    END
+    PATCH_IF (c0_luck_critical > 0 OR c0_luck_miss > 0) BEGIN
+      PATCH_IF (c0_luck_critical = 0 OR c0_luck_miss = 0) BEGIN
+        PATCH_FAIL ~Battleluck: incomplete critical-hit/miss payload.~
+      END
+      SET c0_luck_matched += 1
+      WRITE_BYTE (c0_luck_ability + 0x0c) 5  // Center on caster.
+      WRITE_BYTE (c0_luck_ability + 0x0d) 1
+      WRITE_SHORT (c0_luck_ability + 0x0e) 0
+      WRITE_SHORT (c0_luck_ability + 0x26) party_projectile
+      FOR (c0_luck_i = 0; c0_luck_i < c0_luck_count; ++c0_luck_i) BEGIN
+        SET c0_luck_fx = c0_luck_effects + 0x30 * (c0_luck_first + c0_luck_i)
+        READ_SHORT c0_luck_fx c0_luck_opcode
+        READ_LONG (c0_luck_fx + 8) c0_luck_mode
+        READ_BYTE (c0_luck_fx + 0x0c) c0_luck_timing
+        READ_ASCII (c0_luck_fx + 0x14) c0_luck_resource (8) NULL
+        PATCH_IF (((c0_luck_opcode = 301 OR c0_luck_opcode = 362) AND c0_luck_mode = 0) OR
+                  (c0_luck_opcode = 142 AND c0_luck_mode = luck_icon)) BEGIN
+          WRITE_BYTE (c0_luck_fx + 2) 2 // Each projectile recipient, not the caster.
+          WRITE_BYTE (c0_luck_fx + 0x0c) 0
+          WRITE_LONG (c0_luck_fx + 0x0e) 30
+        END ELSE PATCH_IF (c0_luck_opcode = 174 AND c0_luck_timing = 4 AND
+                           ~%c0_luck_resource%~ STRING_EQUAL_CASE ~EFF_E04~) BEGIN
+          WRITE_BYTE (c0_luck_fx + 2) 2
+          WRITE_LONG (c0_luck_fx + 0x0e) 30
+        END
+      END
+      // Normalize only Battleluck's own refreshes. This handles reapplication
+      // and alternate record ordering without disturbing foreign removals.
+      PATCH_FOR_EACH c0_luck_alias IN ~C0BW302~ ~C0GA302~ BEGIN
+        LPF DELETE_EFFECT INT_VAR match_opcode = 321 header = c0_luck_header
+          check_globals = 0 STR_VAR match_resource = EVAL ~%c0_luck_alias%~ END
+      END
+      PATCH_FOR_EACH c0_luck_alias IN ~C0GA302~ ~C0BW302~ BEGIN
+        LPF ADD_SPELL_EFFECT INT_VAR header = (c0_luck_header + 1) insert_point = 0
+          opcode = 321 target = 2 parameter2 = 2 timing = 1 resist_dispel = 2
+          STR_VAR resource = EVAL ~%c0_luck_alias%~ END
+      END
+    END
+  END
+  PATCH_IF (c0_luck_matched = 0) BEGIN
+    PATCH_FAIL ~Battleluck: no direct critical-hit/miss ability found.~
+  END
+END
+
+// Gallant's later C0GA302 copy inherits the projectile, duration and both
+// refresh aliases. No shared priest spell or scroll is modified here.
+COPY_EXISTING ~C0BW302.SPL~ ~override~
+  LPF c0_patch_battleluck INT_VAR party_projectile = C0BWLCK luck_icon = C0BW302I END
+  BUT_ONLY

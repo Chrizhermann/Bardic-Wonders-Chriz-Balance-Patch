@@ -67,6 +67,29 @@ shared-ability and Abettor playtesting on 16 September 2026 and approved release
 That broad playtest does not separately establish the opening/finale party
 invisibility tracked in issue #5. The Darkbloom Spell Revisions exclusion still applies.
 
+## Version v2.9c-balance.7
+
+This release changes **Blade Overhaul (1001)** and **New Bard Spells
+(2008)**. Use the normal bundled WeiDU installer. See the
+[release notes](docs/releases/v2.9c-balance.7.md) for installation and checks.
+
+- **Blade:** Specialization (two weapon slots) in bastard swords, long swords,
+  short swords, two-handed swords, katanas, scimitars/wakizashis/ninjatos,
+  daggers, axes, spears and halberds. Automatic Two-Weapon Style grants stay at
+  three slots, including the later level grants. Existing characters are not
+  automatically retrained.
+- **Battleluck:** five rounds, affecting the caster and allies within a
+  30-foot radius. Recasting refreshes its critical-hit and critical-miss
+  benefits instead of accumulating them, including the Gallant copy.
+
+These changes have not yet received an in-game playtest. The separate request
+to make Heroism, Greater Heroism and Potion of Heroism mutually exclusive has
+an approved first-active-buff rule, but its runtime integration is still pending;
+the potion is not covered by the existing spell-removal effects. See the
+[Heroism integration handoff](docs/heroism-family-integration.md).
+Song of Heroism and Aid remain outside that requested family. Bard access to
+Free Action and Chaotic Commands is unchanged.
+
 ## Installation
 
 Version **v2.9c-balance.6** adds optional component **3010 — Kit-specific bard
