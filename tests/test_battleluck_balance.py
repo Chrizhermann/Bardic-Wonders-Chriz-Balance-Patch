@@ -75,6 +75,8 @@ class BattleluckBalanceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = (MOD / "lib/new_spells.tpa").read_text(encoding="utf-8")
+        cls.gallant = (MOD / "lib/gallant_new_spells.tpa").read_text(encoding="utf-8")
+        cls.kit = (MOD / "lib/gallant.tpa").read_text(encoding="utf-8")
 
     def resource_actions(self):
         description = self.source[self.source.index("OUTER_SPRINT C0BW302_NAME1"):self.source.index("OUTER_SPRINT C0BW403_NAME1")]
@@ -82,10 +84,18 @@ class BattleluckBalanceTests(unittest.TestCase):
         stop = self.source.index("COPY_EXISTING C0BW403.SPL", start)
         actions = self.source[start:stop]
         self.assertIn("INCLUDE ~%MOD_FOLDER%/lib/battleluck_balance.tpa~", actions)
-        # The actual later Gallant COPY must inherit the patched spell.
-        alias = re.search(r"COPY_EXISTING ~C0BW302.SPL~ ~OVERRIDE/C0GA302.SPL~\s*WRITE_SHORT 0x1C 2", self.source, re.IGNORECASE)
+        # The actual Gallant COPY must inherit the patched spell. The shared
+        # integration runs after the patch in component 2008, or in the kit
+        # component once 2008 (and so the patch) is already installed.
+        call = re.compile(r"ACTION_IF MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~(\d+)~ THEN BEGIN\s*"
+                          r"LAF C0_BW_GALLANT_NEW_SPELLS END\s*END")
+        in_spells = call.search(self.source)
+        self.assertIsNotNone(in_spells)
+        self.assertEqual("1012", in_spells[1])
+        self.assertGreater(in_spells.start(), stop)
+        self.assertEqual(["2008"], call.findall(self.kit))
+        alias = re.search(r"COPY_EXISTING ~C0BW302.SPL~ ~OVERRIDE/C0GA302.SPL~\s*WRITE_SHORT 0x1C 2", self.gallant, re.IGNORECASE)
         self.assertIsNotNone(alias)
-        self.assertGreater(alias.start(), stop)
         return description + actions + "\n" + alias.group(0)
 
     def weidu(self, root, *, operation="install", success=True):
