@@ -6,11 +6,19 @@ A personal balance-patch fork of [Bardic Wonders](https://github.com/TheArtisanB
 > **SPELL REVISIONS COMPATIBILITY — PHASE 0**
 >
 > **Do not include the Darkbloom Bard kit (component `1006`) in recommended
-> Spell Revisions installs or mod collections for now.** Darkbloom imports
-> spells by fixed physical `SPPRxxx` filenames. Under SR, those slots can hold
-> different spells: the inspected install produced Strength of Stone instead
-> of Curse, Cause Moderate Wounds instead of Beast Claw, Icelance instead of
-> Mold Touch, and Healing Mist instead of Mist of Eldath.
+> Spell Revisions installs or mod collections for now.** Released versions
+> through `v2.9c-balance.7` import Darkbloom's spells by fixed physical
+> `SPPRxxx` filenames. Under SR, those slots can hold different spells: the
+> inspected install produced Strength of Stone instead of Curse, Cause Moderate
+> Wounds instead of Beast Claw, and Icelance instead of Mold Touch. Its Mist of
+> Eldath was shown as Healing Mist because it shares a name string that reads
+> "Healing Mist" in that installation.
+>
+> The development branch selects these spells by their `SPELL.IDS` names and
+> installs Darkbloom's bundled versions under its own resource names when a
+> spell is missing (see [priest-spell copies](docs/priest-spell-imports.md)).
+> The exclusion stays until that change is released and checked in a Spell
+> Revisions game.
 >
 > This failure is local to Darkbloom's copied spell list. It is separate from
 > Artisan's Kitpack Favored Soul's global priest-delivery problem and does not
@@ -158,18 +166,25 @@ install order and follow its safety instructions. That tail component applies
 only the Abettor rebalance; it does not deliver the other kits' changes in this
 release.
 
-### Deferred compatibility fixes
+### Compatibility fixes (unreleased)
 
-Phase 0 documents the exclusion without changing installer or spell code. The
-later compatibility implementation must:
+Phase 0 documented the exclusion without changing installer or spell code. The
+development branch now implements the follow-up; see
+[priest-spell copies](docs/priest-spell-imports.md):
 
-- resolve Darkbloom's intended spells semantically and validate a bundled
-  fallback instead of assuming fixed `SPPRxxx` slots;
-- audit the other priest-spell clones in New Bard Spells, Troubadour, and
-  Deathsinger under both vanilla and Spell Revisions;
-- make New Bard Spells/Gallant integration independent of component order; and
-- add install-and-uninstall fixtures that verify spell identity, mechanics,
-  type, level, and class availability before the warning is removed.
+- Darkbloom, Troubadour, Deathsinger and New Bard Spells copy each priest spell
+  named by its `SPELL.IDS` symbol instead of a fixed `SPPRxxx` file.
+  Darkbloom installs its bundled spells under its own resource names only when
+  the installation lacks them.
+- Each copy refreshes itself the way its source spell does, instead of
+  stacking with its own earlier casts.
+- New Bard Spells reach the Gallant whichever of the two components is
+  installed second.
+- Install-and-uninstall fixtures check spell identity, mechanics, type, level,
+  and class availability on vanilla and Spell Revisions-like layouts.
+
+The warning above stays until these changes are released and checked in a
+Spell Revisions game.
 
 ## Acknowledgments
 
