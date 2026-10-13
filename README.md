@@ -27,11 +27,16 @@ A personal balance-patch fork of [Bardic Wonders](https://github.com/TheArtisanB
 > [!NOTE]
 > **KNOWN ISSUE — SYMPHONY PARTY INVISIBILITY**
 >
-> Earlier live-install work supports accepting the broader Abettor kit for
-> release, but there is no surviving in-engine verification of the intended
-> one-round ordinary party Invisibility at the beginning and end of **Symphony
-> of the Dark Children**, and it may not trigger. The remaining song changes are
-> usable as released; the invisibility behavior is tracked separately in [issue
+> **Symphony of the Dark Children** is described as giving affected party
+> members one round of ordinary Invisibility when the song begins and when it
+> ends. Resource inspection confirms that the ending is not implemented as
+> described. Its hook is a copy of a Bard Song Mechanics Tweak check that runs
+> every round while the song lasts and fires only while the singer is asleep,
+> panicked, stunned, helpless, silenced, charmed, feebleminded or confused.
+> Nothing happens when the song runs out, and a disabled singer gives the party
+> Invisibility every round. The opening hook is in place but has not been
+> verified in the engine. The remaining song changes are usable as released;
+> the invisibility behavior is tracked separately in [issue
 > #5](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5).
 
 ## Credit & original author
