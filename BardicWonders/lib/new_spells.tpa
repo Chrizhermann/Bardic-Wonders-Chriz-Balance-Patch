@@ -361,21 +361,21 @@ Saving Throw: None
 
 This spell enables the caster to bring back to memory 2 spells that have been previously cast. If no spells have been cast yet, nothing happens. Wondrous Recall cannot recall 6th-level or higher spells.~
 
-COPY_EXISTING ~SPPR308.SPL~ ~OVERRIDE/C0BW303.SPL~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 3
-COPY_EXISTING ~SPPR403.SPL~ ~OVERRIDE/C0BW401.SPL~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 4
-COPY_EXISTING ~SPPR406.SPL~ ~OVERRIDE/C0BW402.SPL~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 4
-COPY_EXISTING ~SPPR508.SPL~ ~OVERRIDE/C0BW501.SPL~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 5
-COPY_EXISTING ~SPPR611.SPL~ ~OVERRIDE/C0BW602.SPL~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 6
+// Priest spells shared with bards. SPELL.IDS names each intended spell, so
+// the installed Spell Revisions or IWD:EE version is copied rather than
+// whatever occupies the vanilla SPPRxxx file.
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 3
+  STR_VAR symbol = ~CLERIC_REMOVE_PARALYSIS~ destination = ~C0BW303~ label = ~Remove Paralysis~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 4
+  STR_VAR symbol = ~CLERIC_FREE_ACTION~ destination = ~C0BW401~ label = ~Free Action~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 4
+  STR_VAR symbol = ~CLERIC_DEFENSIVE_HARMONY~ destination = ~C0BW402~ label = ~Defensive Harmony~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 5
+  STR_VAR symbol = ~CLERIC_CHAOTIC_COMMANDS~ destination = ~C0BW501~ label = ~Chaotic Commands~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 6
+  STR_VAR symbol = ~CLERIC_WONDROUS_RECALL~ destination = ~C0BW602~ label = ~Wondrous Recall~ END
+// Bards recall arcane spells: restore wizard as well as priest spells.
+COPY_EXISTING ~C0BW602.SPL~ ~OVERRIDE~
 LPF CLONE_EFFECT INT_VAR match_opcode = 261 match_parameter2 = 1 parameter2 = 0 END 
 
 ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPPR308C.ITM~ THEN BEGIN
@@ -705,82 +705,8 @@ COPY_EXISTING_REGEXP GLOB ~.+\.CRE~ ~override~
       END
       BUT_ONLY
 	  
-ACTION_IF MOD_IS_INSTALLED ~Setup-BardicWonders/BardicWonders.tp2~ ~1012~ THEN BEGIN
-
-COPY_EXISTING ~C0BW101.SPL~ ~OVERRIDE/C0GA101.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW102.SPL~ ~OVERRIDE/C0GA102.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW103.SPL~ ~OVERRIDE/C0GA103.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW201.SPL~ ~OVERRIDE/C0GA201.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW202.SPL~ ~OVERRIDE/C0GA202.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW203.SPL~ ~OVERRIDE/C0GA203.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW301.SPL~ ~OVERRIDE/C0GA301.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW302.SPL~ ~OVERRIDE/C0GA302.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW401.SPL~ ~OVERRIDE/C0GA401.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW402.SPL~ ~OVERRIDE/C0GA402.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW403.SPL~ ~OVERRIDE/C0GA403.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW501.SPL~ ~OVERRIDE/C0GA501.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW502.SPL~ ~OVERRIDE/C0GA502.SPL~
-WRITE_SHORT 0X1C 2
-COPY_EXISTING ~C0BW601.SPL~ ~OVERRIDE/C0GA601.SPL~
-WRITE_SHORT 0X1C 2
-  
-COPY_EXISTING ~C0GALLAN.2DA~ ~OVERRIDE~
-  LPF set_clab_2da_entries INT_VAR f_MinLevel = 1 f_MaxLevel = 1 STR_VAR f_Entry = AP_C0GALL3 END // Inspirations
-
-ACTION_FOR_EACH description IN 
-    CLASTEXT
-  BEGIN
-    ACTION_IF FILE_EXISTS_IN_GAME ~%description%.2da~ BEGIN
-      COPY_EXISTING ~%description%.2DA~ ~override~
-      COUNT_2DA_COLS col_count
-      COUNT_2DA_ROWS col_count rows
-      FOR (index = 0; index < rows; ++index) BEGIN
-        READ_2DA_ENTRY index 0 col_count row_name
-        READ_2DA_ENTRY index 1 col_count class_id
-//inspiration
-        PATCH_IF "%row_name%" STRING_EQUAL_CASE "C0_GALLANT" BEGIN
-          READ_2DA_ENTRY index 4 col_count kit_desc
-          SPRINT old_desc ~<BARDIC_SPELLS>~
-          SPRINT new_desc ~– Gains Bard-exclusive spells as priest spells.~
-          GET_STRREF %kit_desc% desc_text
-          INNER_PATCH_SAVE desc_text ~%desc_text%~ BEGIN
-            REPLACE_TEXTUALLY ~%old_desc%~ ~
-%new_desc%~
-          END
-            SET_2DA_ENTRY index 4 col_count RESOLVE_STR_REF (~%desc_text%~)
-            INNER_ACTION BEGIN
-            OUTER_SET new_description = RESOLVE_STR_REF (~%desc_text%~)
-            END
-            PRETTY_PRINT_2DA
-		END
-		  END
-		  END
-
-      COPY_EXISTING ~KITLIST.2DA~ ~override~
-      COUNT_2DA_COLS col_count
-      COUNT_2DA_ROWS col_count rows
-      FOR (index = 1; index < rows; ++index) BEGIN
-        READ_2DA_ENTRY index 1 col_count row_name
-        READ_2DA_ENTRY index 8 col_count class_id
-//inspiration
-        PATCH_IF "%row_name%" STRING_EQUAL_CASE "C0_GALLANT" BEGIN
-          SET_2DA_ENTRY index 4 col_count new_description
-            PRETTY_PRINT_2DA
-		      END
-		  END
-
-      BUT_ONLY
-    END
-  END
+// The Gallant integration runs in whichever of components 1012 and 2008 is
+// installed second; see lib/gallant_new_spells.tpa.
+ACTION_IF MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~1012~ THEN BEGIN
+  LAF C0_BW_GALLANT_NEW_SPELLS END
+END

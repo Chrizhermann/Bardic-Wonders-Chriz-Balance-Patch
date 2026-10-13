@@ -1,0 +1,231 @@
+// Private copies of priest spells for Bardic Wonders kits and spell lists.
+//
+// Spell Revisions, IWDification and IWD:EE keep spells in different physical
+// SPPRxxx files, so a vanilla filename does not identify a spell. Callers name
+// the intended spell by its SPELL.IDS symbol and receive a private copy of the
+// spell this installation actually defines.
+//
+// A renamed copy also changes resource identity (IESDP opcodes 206, 318, 321
+// and 324 name a spell by resref). Copies of installed spells keep each
+// reference to the original and gain the same reference to the copy, so the
+// copy refreshes and excludes itself like the original does.
+
+// Structural check shared by installed and bundled spells: every table that
+// the patches below read must lie inside the file.
+DEFINE_PATCH_FUNCTION C0_BW_SPL_IS_VALID
+  RET valid
+BEGIN
+  SET valid = 0
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 c0_spl_signature (8)
+    READ_LONG 0x64 c0_spl_abilities
+    READ_SHORT 0x68 c0_spl_ability_count
+    READ_LONG 0x6a c0_spl_effects
+    READ_SHORT 0x6e c0_spl_cast_first
+    READ_SHORT 0x70 c0_spl_cast_count
+    PATCH_IF ((~%c0_spl_signature%~ STRING_EQUAL ~SPL V1  ~) AND
+              c0_spl_ability_count > 0 AND
+              c0_spl_abilities >= 0x72 AND
+              c0_spl_abilities + 0x28 * c0_spl_ability_count <= BUFFER_LENGTH AND
+              c0_spl_effects >= 0x72 AND
+              c0_spl_effects + 0x30 * (c0_spl_cast_first + c0_spl_cast_count) <= BUFFER_LENGTH) BEGIN
+      SET valid = 1
+      FOR (c0_spl_header = 0; c0_spl_header < c0_spl_ability_count; ++c0_spl_header) BEGIN
+        READ_SHORT (c0_spl_abilities + 0x28 * c0_spl_header + 0x1e) c0_spl_count
+        READ_SHORT (c0_spl_abilities + 0x28 * c0_spl_header + 0x20) c0_spl_first
+        PATCH_IF (c0_spl_effects + 0x30 * (c0_spl_first + c0_spl_count) > BUFFER_LENGTH) BEGIN
+          SET valid = 0
+        END
+      END
+    END
+  END
+END
+
+// Mold Touch (opcode 78, types 11 and 12) applies the SPL named in its
+// resource, defaulting to "<parent resref>B" when the resource is empty
+// (IESDP). A renamed parent would look for a sub-spell that does not exist,
+// so name the intended sub-spell explicitly. Other effects are unchanged.
+DEFINE_PATCH_FUNCTION C0_BW_SPL_NAME_MOLD_SUBSPELL
+  STR_VAR subspell = ~~
+BEGIN
+  READ_LONG 0x64 c0_mold_abilities
+  READ_SHORT 0x68 c0_mold_ability_count
+  READ_LONG 0x6a c0_mold_effects
+  READ_SHORT 0x6e c0_mold_first
+  READ_SHORT 0x70 c0_mold_count
+  // Slice -1 is the casting (global) block; the others are abilities.
+  FOR (c0_mold_header = 0 - 1; c0_mold_header < c0_mold_ability_count; ++c0_mold_header) BEGIN
+    PATCH_IF (c0_mold_header >= 0) BEGIN
+      READ_SHORT (c0_mold_abilities + 0x28 * c0_mold_header + 0x1e) c0_mold_count
+      READ_SHORT (c0_mold_abilities + 0x28 * c0_mold_header + 0x20) c0_mold_first
+    END
+    FOR (c0_mold_i = c0_mold_first; c0_mold_i < c0_mold_first + c0_mold_count; ++c0_mold_i) BEGIN
+      SET c0_mold_fx = c0_mold_effects + 0x30 * c0_mold_i
+      READ_SHORT c0_mold_fx c0_mold_opcode
+      READ_LONG (c0_mold_fx + 0x08) c0_mold_type
+      READ_ASCII (c0_mold_fx + 0x14) c0_mold_resource (8) NULL
+      PATCH_IF (c0_mold_opcode = 78 AND (c0_mold_type = 11 OR c0_mold_type = 12) AND
+                (~%c0_mold_resource%~ STRING_EQUAL ~~)) BEGIN
+        WRITE_ASCIIE (c0_mold_fx + 0x14) ~%subspell%~ (8)
+      END
+    END
+  END
+END
+
+// Make a copy answer to its own resref.
+//   keep_source = 1: add a reference to the copy beside each reference to
+//                    the original (installed spells: the original remains in
+//                    the game, and the copy stays part of the same family).
+//   keep_source = 0: move each reference to the copy (bundled spells: their
+//                    original name may belong to an unrelated installed spell).
+DEFINE_PATCH_FUNCTION C0_BW_SPL_COPY_IDENTITY
+  INT_VAR keep_source = 1
+  STR_VAR source = ~~ destination = ~~
+BEGIN
+  PATCH_FOR_EACH c0_identity_opcode IN 206 318 321 324 BEGIN
+    PATCH_IF keep_source BEGIN
+      LPF CLONE_EFFECT INT_VAR silent = 1 match_opcode = c0_identity_opcode
+        STR_VAR match_resource = EVAL ~%source%~ resource = EVAL ~%destination%~ END
+    END ELSE BEGIN
+      LPF ALTER_EFFECT INT_VAR silent = 1 match_opcode = c0_identity_opcode
+        STR_VAR match_resource = EVAL ~%source%~ resource = EVAL ~%destination%~ END
+    END
+  END
+END
+
+// Install a bundled spell under a private name. Bundled spells keep their
+// original IWD resrefs internally, and those names can belong to unrelated
+// installed spells (Spell Revisions' SPPR112 is Strength of Stone). Icons named
+// <identity>B/C become <destination>B/C, identity references move to the copy,
+// Mold Touch names the given sub-spell, and every ability uses the given
+// projectile (0 keeps the bundled value).
+DEFINE_PATCH_FUNCTION C0_BW_SPL_PRIVATE_FALLBACK
+  INT_VAR
+    spell_type  = 0
+    spell_level = 0
+    projectile  = 0
+  STR_VAR
+    identity    = ~~
+    destination = ~~
+    subspell    = ~~
+    label       = ~~
+BEGIN
+  LPF C0_BW_SPL_IS_VALID RET c0_fallback_valid = valid END
+  PATCH_IF NOT c0_fallback_valid BEGIN
+    PATCH_FAIL ~Bardic Wonders: the bundled %label% (%identity%) is not a valid SPL V1 file.~
+  END
+  PATCH_IF (spell_type > 0) BEGIN
+    WRITE_SHORT 0x1c spell_type
+  END
+  PATCH_IF (spell_level > 0) BEGIN
+    WRITE_LONG 0x34 spell_level
+  END
+  READ_ASCII 0x3a c0_fallback_icon (8) NULL
+  PATCH_IF (~%c0_fallback_icon%~ STRING_EQUAL_CASE ~%identity%C~) BEGIN
+    WRITE_ASCIIE 0x3a ~%destination%C~ (8)
+  END
+  READ_LONG 0x64 c0_fallback_abilities
+  READ_SHORT 0x68 c0_fallback_count
+  FOR (c0_fallback_i = 0; c0_fallback_i < c0_fallback_count; ++c0_fallback_i) BEGIN
+    SET c0_fallback_ability = c0_fallback_abilities + 0x28 * c0_fallback_i
+    READ_ASCII (c0_fallback_ability + 0x04) c0_fallback_icon (8) NULL
+    PATCH_IF (~%c0_fallback_icon%~ STRING_EQUAL_CASE ~%identity%B~) BEGIN
+      WRITE_ASCIIE (c0_fallback_ability + 0x04) ~%destination%B~ (8)
+    END
+    PATCH_IF (projectile > 0) BEGIN
+      WRITE_SHORT (c0_fallback_ability + 0x26) projectile
+    END
+  END
+  PATCH_IF NOT (~%subspell%~ STRING_EQUAL ~~) BEGIN
+    LPF C0_BW_SPL_NAME_MOLD_SUBSPELL STR_VAR subspell = EVAL ~%subspell%~ END
+  END
+  LPF C0_BW_SPL_COPY_IDENTITY INT_VAR keep_source = 0
+    STR_VAR source = EVAL ~%identity%~ destination = EVAL ~%destination%~ END
+END
+
+// Replace one resref field of a bundled file. An unexpected current value
+// stops the install, so a changed template is never patched at a wrong offset.
+DEFINE_PATCH_FUNCTION C0_BW_REPLACE_RESREF
+  INT_VAR offset = 0
+  STR_VAR expected = ~~ resref = ~~ label = ~~
+BEGIN
+  PATCH_IF (offset + 8 > BUFFER_LENGTH) BEGIN
+    PATCH_FAIL ~Bardic Wonders: the bundled %label% is truncated.~
+  END
+  READ_ASCII offset c0_replace_old (8) NULL
+  PATCH_IF NOT (~%c0_replace_old%~ STRING_EQUAL_CASE ~%expected%~) BEGIN
+    PATCH_FAIL ~Bardic Wonders: the bundled %label% names %c0_replace_old% at offset %offset%, expected %expected%.~
+  END
+  WRITE_ASCIIE offset ~%resref%~ (8)
+END
+
+// Resolve a priest spell by SPELL.IDS symbol (numbers 1xxx are SPPRxxx).
+// Returns an empty resref when the installation does not define the spell.
+DEFINE_ACTION_FUNCTION C0_BW_RESOLVE_PRIEST_SPELL
+  STR_VAR symbol = ~~
+  RET resref
+BEGIN
+  OUTER_SPRINT resref ~~
+  OUTER_SET c0_resolve_number = IDS_OF_SYMBOL (~SPELL~ ~%symbol%~)
+  ACTION_IF (c0_resolve_number > 1000 AND c0_resolve_number < 2000) BEGIN
+    OUTER_SET c0_resolve_slot = c0_resolve_number - 1000
+    ACTION_IF (c0_resolve_slot < 10) BEGIN
+      OUTER_SPRINT c0_resolve_candidate ~SPPR00%c0_resolve_slot%~
+    END ELSE ACTION_IF (c0_resolve_slot < 100) BEGIN
+      OUTER_SPRINT c0_resolve_candidate ~SPPR0%c0_resolve_slot%~
+    END ELSE BEGIN
+      OUTER_SPRINT c0_resolve_candidate ~SPPR%c0_resolve_slot%~
+    END
+    ACTION_IF FILE_EXISTS_IN_GAME ~%c0_resolve_candidate%.SPL~ BEGIN
+      OUTER_SPRINT resref ~%c0_resolve_candidate%~
+    END ELSE BEGIN
+      PRINT ~Bardic Wonders: SPELL.IDS maps %symbol% to %c0_resolve_candidate%, but %c0_resolve_candidate%.SPL does not exist.~
+    END
+  END ELSE ACTION_IF (c0_resolve_number >= 0) BEGIN
+    PRINT ~Bardic Wonders: SPELL.IDS maps %symbol% to %c0_resolve_number%, which is not a priest spell number.~
+  END
+END
+
+// Copy the installed spell named by symbol to override/<destination>.SPL as a
+// spell of the given type and level (0 keeps the installed value). When the
+// installation lacks the spell, required = 1 fails the component; otherwise
+// imported = 0 tells the caller to install its bundled version instead.
+DEFINE_ACTION_FUNCTION C0_BW_IMPORT_PRIEST_SPELL
+  INT_VAR
+    spell_type  = 0
+    spell_level = 0
+    required    = 1
+  STR_VAR
+    symbol      = ~~
+    destination = ~~
+    label       = ~~
+  RET
+    imported
+    source
+BEGIN
+  ACTION_IF (~%label%~ STRING_EQUAL ~~) BEGIN
+    OUTER_SPRINT label ~%symbol%~
+  END
+  OUTER_SET imported = 0
+  LAF C0_BW_RESOLVE_PRIEST_SPELL STR_VAR symbol = EVAL ~%symbol%~ RET source = resref END
+  ACTION_IF NOT (~%source%~ STRING_EQUAL ~~) BEGIN
+    COPY_EXISTING ~%source%.SPL~ ~override/%destination%.SPL~
+      LPF C0_BW_SPL_IS_VALID RET c0_import_valid = valid END
+      PATCH_IF NOT c0_import_valid BEGIN
+        PATCH_FAIL ~Bardic Wonders: %label% resolves to %source%.SPL, which is not a valid SPL V1 file; %destination% cannot be created.~
+      END
+      PATCH_IF (spell_type > 0) BEGIN
+        WRITE_SHORT 0x1c spell_type
+      END
+      PATCH_IF (spell_level > 0) BEGIN
+        WRITE_LONG 0x34 spell_level
+      END
+      LPF C0_BW_SPL_NAME_MOLD_SUBSPELL STR_VAR subspell = EVAL ~%source%B~ END
+      LPF C0_BW_SPL_COPY_IDENTITY INT_VAR keep_source = 1
+        STR_VAR source = EVAL ~%source%~ destination = EVAL ~%destination%~ END
+    OUTER_SET imported = 1
+    PRINT ~Bardic Wonders: %destination% copies %label% from the installed %source%.SPL.~
+  END ELSE ACTION_IF required BEGIN
+    FAIL ~Bardic Wonders: this installation does not define %label% (%symbol% in SPELL.IDS with an existing SPL), so %destination% cannot be created.~
+  END
+END
