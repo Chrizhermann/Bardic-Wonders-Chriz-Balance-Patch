@@ -6,7 +6,7 @@ STRING_SET_EVALUATE kit_strref ~BLADE: Blades are master artisans with bladed we
 
 Advantages:
 – Blade Dancer: The blade uses their Charisma modifier, if higher, for melee bonuses to hit instead of Strength.
-– May achieve Grand Mastery (five slots) in any bladed weapon.
+– May achieve Specialization (two slots) in bastard swords, long swords, short swords, two-handed swords, katanas, scimitars, wakizashis, ninjatōs, daggers, axes, spears, and halberds.
 – Gains Mastery in Two-Weapon Style at 1st level.
 – Instead of a regular Bard Song, the blade may perform a Weapons Display, performing a deadly dance with their weapons to intimidate their foes while inspiring their allies. This reduces the morale of all nearby foes by 2 while granting a +1 bonus to hit to all allies within visual range. The display has no effect on non-sentient creatures such as golems or undead.
 – May use the Offensive Spin and Defensive Spin abilities once per day. Gains one use each at level 1 and an additional use each every 4 levels thereafter. Using either spin will remove the effects of the other, if ongoing.
@@ -106,36 +106,8 @@ COPY_EXISTING ~splprot.2da~ ~override~
 	  END
 	END
 
-// BLADES - 2 WEAPON STYLE
-ACTION_CLEAR_ARRAY weapprof_cols_blade
-        
-COPY_EXISTING ~weapprof.2da~  ~override~
-  COUNT_2DA_COLS col_count
-  SET col_check = col_count - 1
-  FOR (column = 0; column < col_check; ++column) BEGIN
-    READ_2DA_ENTRY 0 column col_check name
-    PATCH_IF (("BLADE" STRING_COMPARE_CASE "%name%" = 0)) BEGIN
-      SET column += 1 // row with names has an empty entry for the first column
-      DEFINE_ASSOCIATIVE_ARRAY weapprof_cols_blade BEGIN ~%column%~ => ~%column%~ END
-    END
-  END
-  PATCH_PHP_EACH weapprof_cols_blade AS column => foo BEGIN
-    FOR (row = 8; row < 32; ++row) BEGIN
-      READ_2DA_ENTRY row column col_count stars
-      PATCH_IF (stars < 5) BEGIN
-        SET_2DA_ENTRY 8 column col_count 5
-        SET_2DA_ENTRY 9 column col_count 5
-        SET_2DA_ENTRY 10 column col_count 5
-        SET_2DA_ENTRY 12 column col_count 5
-        SET_2DA_ENTRY 13 column col_count 5
-        SET_2DA_ENTRY 14 column col_count 5
-        SET_2DA_ENTRY 15 column col_count 5
-        SET_2DA_ENTRY 31 column col_count 0
-      END
-    END
-  END
-  PRETTY_PRINT_2DA
-  BUT_ONLY
+// CHRIZ BALANCE: explicit weapon caps and the existing automatic style grant.
+INCLUDE ~%MOD_FOLDER%/lib/blade_proficiencies.tpa~
 
 // ICONS
 

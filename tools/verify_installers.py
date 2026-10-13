@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-MAIN_VERSION = "v2.9c-balance.6"
+MAIN_VERSION = "v2.9c-balance.7"
 TAIL_VERSION = "1.1.0"
 
 

@@ -98,13 +98,13 @@ OUTER_SPRINT C0BW302_DESC ~Battleluck
 (Enchantment/Charm)
 
 Level: 3
-Range: Visual range of the caster
-Duration: 1 hour
+Range: 0
+Duration: 5 rounds
 Casting Time: 2
-Area of Effect: 1 person
+Area of Effect: Allies within a 30-ft. radius of the caster
 Saving Throw: None
 
-The targeted creature is blessed with fortune in battle. For the next hour, their attacks will never critically miss, even on a roll of 1, and their critical hit modifier is increased by 1. From 14th level onwards, their critical hit modifier is further increased to 2.~
+The caster and nearby allies are blessed with fortune in battle. For the next five rounds, their attacks will never critically miss, even on a roll of 1, and their critical hit modifier is increased by 1. From 14th level onwards, their critical hit modifier is further increased to 2. Recasting Battleluck refreshes its duration rather than increasing its bonuses.~
 
 OUTER_SPRINT C0BW403_NAME1 ~Heroic Cry~
 OUTER_SPRINT C0BW403_DESC ~Heroic Cry
@@ -207,10 +207,12 @@ SAY NAME1 ~%C0BW301_NAME1%~
 SAY UNIDENTIFIED_DESC ~%C0BW301_DESC%~
 
 COPY_EXISTING C0BW302.SPL OVERRIDE
-  LPF ALTER_EFFECT INT_VAR match_opcode = 142 parameter2 = C0BW302I END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 142 match_parameter2 = 0 parameter2 = C0BW302I END
   LPF ALTER_EFFECT INT_VAR match_opcode = 139 parameter1 = RESOLVE_STR_REF (~Critical Hit Modifier Increased~) END
 SAY NAME1 ~%C0BW302_NAME1%~
 SAY UNIDENTIFIED_DESC ~%C0BW302_DESC%~
+
+INCLUDE ~%MOD_FOLDER%/lib/battleluck_balance.tpa~
 
 COPY_EXISTING C0BW403.SPL OVERRIDE
   LPF ALTER_EFFECT INT_VAR match_opcode = 139 parameter1 = RESOLVE_STR_REF (~Frightened~) END
