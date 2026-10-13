@@ -241,24 +241,21 @@ SAY NAME2 ~Sacred Breath~
 SAY UNIDENTIFIED_DESC ~Sacred Breath
 This ability functions the same way as the 5th level priest spell Raise Dead, restoring the target to life.~
 
-COPY_EXISTING ~SPPR103.spl~ ~override/C0TRBS1.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 1
-COPY_EXISTING ~SPPR201.spl~ ~override/C0TRBS2.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 2
-COPY_EXISTING ~SPPR315.spl~ ~override/C0TRBS3.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 3
-COPY_EXISTING ~SPPR401.spl~ ~override/C0TRBS4.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 4
-COPY_EXISTING ~SPPR514.spl~ ~override/C0TRBS5.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 5
-COPY_EXISTING ~SPPR607.spl~ ~override/C0TRBS6.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 6
+// Priest spells granted by the kit table. SPELL.IDS names each intended
+// spell, so the installed Spell Revisions or IWD:EE version is copied rather
+// than whatever occupies the vanilla SPPRxxx file.
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 1
+  STR_VAR symbol = ~CLERIC_CURE_LIGHT_WOUNDS~ destination = ~C0TRBS1~ label = ~Cure Light Wounds~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 2
+  STR_VAR symbol = ~CLERIC_AID~ destination = ~C0TRBS2~ label = ~Aid~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 3
+  STR_VAR symbol = ~CLERIC_CURE_MEDIUM_WOUNDS~ destination = ~C0TRBS3~ label = ~Cure Medium Wounds~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 4
+  STR_VAR symbol = ~CLERIC_CURE_SERIOUS_WOUNDS~ destination = ~C0TRBS4~ label = ~Cure Serious Wounds~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 5
+  STR_VAR symbol = ~CLERIC_MASS_CURE~ destination = ~C0TRBS5~ label = ~Mass Cure~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 6
+  STR_VAR symbol = ~CLERIC_HEAL~ destination = ~C0TRBS6~ label = ~Heal~ END
 
 COPY ~%MOD_FOLDER%/troubadour/c0trbhl.spl~ ~override~
 SAY NAME1 ~Holy Hymn of Eldath~

@@ -175,9 +175,11 @@ WRITE_ASCII 0x268 ~BDSUM00~  #8  // default
 WRITE_ASCII 0x280 ~C0DESUM1~ #32 // death variable
 ADD_CRE_ITEM ~c0deaths~ #0 #0 #0 ~NONE~ ~amulet~
 
-COPY_EXISTING ~SPPR113.spl~ ~override/C0DESP1.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 1
+// Priest spells granted by the kit table. SPELL.IDS names each intended
+// spell, so the installed Spell Revisions or IWD:EE version is copied rather
+// than whatever occupies the vanilla SPPRxxx file.
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 1
+  STR_VAR symbol = ~CLERIC_DOOM~ destination = ~C0DESP1~ label = ~Doom~ END
 COPY ~%MOD_FOLDER%/DEATHSINGER/C0DESP2.SPL~ ~OVERRIDE~
 SAY NAME1 ~Death Armor~
 SAY UNIDENTIFIED_DESC ~Death Armor
@@ -204,12 +206,11 @@ Area of Effect: 1 creature
 Saving Throw: None 
 
 This baleful spell inflicts a deadly curse upon the target, permanently reducing all of their attributes and saving throws by 3 points. This effect is permanent and can only be removed via a Remove Curse spell.~
-COPY_EXISTING ~SPPR416.spl~ ~override/C0DESP4.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 4
-COPY_EXISTING ~SPPR511.spl~ ~override/C0DESP5.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 5
+// Cloak of Fear and Slay Living, resolved like Doom above.
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 4
+  STR_VAR symbol = ~CLERIC_CLOAK_OF_FEAR~ destination = ~C0DESP4~ label = ~Cloak of Fear~ END
+LAF C0_BW_IMPORT_PRIEST_SPELL INT_VAR spell_type = 1 spell_level = 5
+  STR_VAR symbol = ~CLERIC_SLAY_LIVING~ destination = ~C0DESP5~ label = ~Slay Living~ END
 COPY ~%MOD_FOLDER%/DEATHSINGER/C0DESP6.SPL~ ~OVERRIDE~
 SAY NAME1 ~Destruction~
 SAY UNIDENTIFIED_DESC ~Destruction

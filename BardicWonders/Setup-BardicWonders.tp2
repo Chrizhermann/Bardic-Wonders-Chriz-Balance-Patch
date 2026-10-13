@@ -12,6 +12,7 @@ ALWAYS
   INCLUDE ~%MOD_FOLDER%/lib/macros.tpa~
   INCLUDE ~%MOD_FOLDER%/lib/ClassSpellTool.tpa~
   INCLUDE ~%MOD_FOLDER%/lib/replace_multiline.tpa~
+  INCLUDE ~%MOD_FOLDER%/lib/priest_spell_import.tpa~
 END
 LANGUAGE ~English~
          ~English~
