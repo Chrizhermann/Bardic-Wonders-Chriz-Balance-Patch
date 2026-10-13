@@ -177,27 +177,34 @@ By means of this spell, the caster is able to cause dark plants and roots in the
 // Apply after the final bundled-resource copies and projectile rewrites.
 INCLUDE ~%MOD_FOLDER%/lib/darkbloom_balance.tpa~
 
+// Druidic spells. SPELL.IDS names the intended spell: Spell Revisions,
+// IWDification and IWD:EE keep spells in different SPPRxxx files, so a fixed
+// filename can copy an unrelated spell (Spell Revisions' SPPR112 is Strength
+// of Stone). When the installation lacks a spell, the bundled IWD version is
+// installed under Darkbloom's own resrefs, so no installed spell, icon, item,
+// projectile, visual effect or sub-spell is replaced.
 // Curse
-ACTION_IF FILE_EXISTS_IN_GAME ~SPPR112.SPL~ THEN BEGIN
-COPY_EXISTING ~SPPR112.spl~ ~override/C0BDDS1.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 1
+LAF C0_BW_IMPORT_PRIEST_SPELL
+  INT_VAR spell_type = 1 spell_level = 1 required = 0
+  STR_VAR symbol = ~CLERIC_CURSE~ destination = ~C0BDDS1~ label = ~Curse~
+  RET imported
 END
-ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPPR112.SPL~ THEN BEGIN
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR112B.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR112C.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/AREA1X.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/#BLESS.VVC~ ~override~
-ADD_PROJECTILE ~%MOD_FOLDER%/darkbloom/BGEE/IDPRO237.PRO~ ~Thorn Spray~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR112.SPL~ ~override/C0BDDS1.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 1
-READ_LONG 0x64 "abil_off"
-READ_SHORT 0x68 "abil_num"
-SET "delta" = 0
-FOR (index = 0; index < abil_num; index = index + 1) BEGIN
-WRITE_SHORT (%abil_off% + (0x28 * %index%) + 0x26) ~%IDPRO237%~
-END
+ACTION_IF NOT imported BEGIN
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR112B.BAM~ ~override/C0BDDS1B.BAM~
+     ~%MOD_FOLDER%/darkbloom/BGEE/SPPR112C.BAM~ ~override/C0BDDS1C.BAM~
+     ~%MOD_FOLDER%/darkbloom/BGEE/AREA1X.BAM~ ~override/C0BDDA1.BAM~
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/#BLESS.VVC~ ~override/C0BDDV1.VVC~
+  LPF C0_BW_REPLACE_RESREF INT_VAR offset = 0x08
+    STR_VAR expected = ~AREA1X~ resref = ~C0BDDA1~ label = ~Curse visual effect~ END
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/IDPRO237.PRO~ ~override/C0BDDP1.PRO~
+  LPF C0_BW_REPLACE_RESREF INT_VAR offset = 0x21c
+    STR_VAR expected = ~#BLESS~ resref = ~C0BDDV1~ label = ~Curse projectile~ END
+ADD_PROJECTILE ~override/C0BDDP1.PRO~ ~Darkbloom Curse~
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR112.SPL~ ~override/C0BDDS1.SPL~
+  LPF C0_BW_SPL_PRIVATE_FALLBACK
+    INT_VAR spell_type = 1 spell_level = 1 projectile = C0BDDP1
+    STR_VAR identity = ~SPPR112~ destination = ~C0BDDS1~ label = ~Curse~
+  END
   LPF ALTER_EFFECT
     INT_VAR
       match_opcode = 139 // display string
@@ -218,19 +225,31 @@ Saving Throw: None
 When uttering the Curse spell, the caster lowers the morale of enemy creatures and any Saving Throws and attack rolls they make by 1. At the instant the spell is completed, it affects all creatures in a 15-ft. radius centered on the point selected by the caster. Affected creatures leaving the area are still subject to the spell's effect; those entering the area after the casting is completed are not.~
 END
 // Beast Claw
-ACTION_IF FILE_EXISTS_IN_GAME ~SPPR219.SPL~ THEN BEGIN
-COPY_EXISTING ~SPPR219.spl~ ~override/C0BDDS2.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 2
+LAF C0_BW_IMPORT_PRIEST_SPELL
+  INT_VAR spell_type = 1 spell_level = 2 required = 0
+  STR_VAR symbol = ~CLERIC_BEAST_CLAW~ destination = ~C0BDDS2~ label = ~Beast Claw~
+  RET imported
 END
-ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPPR219.SPL~ THEN BEGIN
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/IBCLAW.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/BCLAW.ITM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR219B.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR219C.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR219.spl~ ~override/C0BDDS2.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 2
+ACTION_IF NOT imported BEGIN
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR219B.BAM~ ~override/C0BDDS2B.BAM~
+     ~%MOD_FOLDER%/darkbloom/BGEE/SPPR219C.BAM~ ~override/C0BDDS2C.BAM~
+     ~%MOD_FOLDER%/darkbloom/BGEE/IBCLAW.BAM~ ~override/C0BDDS2I.BAM~
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/BCLAW.ITM~ ~override/C0BDDS2W.ITM~
+  LPF C0_BW_REPLACE_RESREF INT_VAR offset = 0x3a
+    STR_VAR expected = ~IBCLAW~ resref = ~C0BDDS2I~ label = ~Beast Claw weapon~ END
+  READ_LONG 0x64 c0_claw_abilities
+  READ_SHORT 0x68 c0_claw_count
+  FOR (c0_claw_i = 0; c0_claw_i < c0_claw_count; ++c0_claw_i) BEGIN
+    LPF C0_BW_REPLACE_RESREF INT_VAR offset = (c0_claw_abilities + 0x38 * c0_claw_i + 0x04)
+      STR_VAR expected = ~IBCLAW~ resref = ~C0BDDS2I~ label = ~Beast Claw weapon~ END
+  END
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR219.SPL~ ~override/C0BDDS2.SPL~
+  LPF C0_BW_SPL_PRIVATE_FALLBACK
+    INT_VAR spell_type = 1 spell_level = 2
+    STR_VAR identity = ~SPPR219~ destination = ~C0BDDS2~ label = ~Beast Claw~
+  END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 111 // create weapon
+    STR_VAR match_resource = ~BCLAW~ resource = ~C0BDDS2W~ END
 SAY NAME1 ~Beast Claw~
 SAY UNIDENTIFIED_DESC ~Beast Claw
 (Alteration)
@@ -246,27 +265,33 @@ Saving Throw: None
 This spell transforms the caster's arms into the claws of a mighty beast, giving the caster 18/72 Strength and the ability to rake an opponent for 2d4 (plus Strength bonus) points of slashing damage. The caster can attack twice per round with the beast claws, with a +2 bonus to hit.~
 END
 // Mold Touch
-ACTION_IF FILE_EXISTS_IN_GAME ~SPPR326.SPL~ THEN BEGIN
-COPY_EXISTING ~SPPR326.spl~ ~override/C0BDDS3.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 3
+LAF C0_BW_IMPORT_PRIEST_SPELL
+  INT_VAR spell_type = 1 spell_level = 3 required = 0
+  STR_VAR symbol = ~CLERIC_MOLD_TOUCH~ destination = ~C0BDDS3~ label = ~Mold Touch~
+  RET imported
 END
-ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPPR326.SPL~ THEN BEGIN
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/MTOUCHH.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/MTOUCHH.VVC~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR326B.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR326C.BAM~ ~override~
-ADD_PROJECTILE ~%MOD_FOLDER%/darkbloom/BGEE/IDMOLD.PRO~ ~Thorn Spray~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR326B.spl~ ~override~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 3
-READ_LONG 0x64 "abil_off"
-READ_SHORT 0x68 "abil_num"
-SET "delta" = 0
-FOR (index = 0; index < abil_num; index = index + 1) BEGIN
-WRITE_SHORT (%abil_off% + (0x28 * %index%) + 0x26) ~%IDMOLD%~
-END
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR326.spl~ ~override/C0BDDS3.spl~
+ACTION_IF NOT imported BEGIN
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR326B.BAM~ ~override/C0BDDS3B.BAM~
+     ~%MOD_FOLDER%/darkbloom/BGEE/SPPR326C.BAM~ ~override/C0BDDS3C.BAM~
+     ~%MOD_FOLDER%/darkbloom/BGEE/MTOUCHH.BAM~ ~override/C0BDDA3.BAM~
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/MTOUCHH.VVC~ ~override/C0BDDV3.VVC~
+  LPF C0_BW_REPLACE_RESREF INT_VAR offset = 0x08
+    STR_VAR expected = ~MTOUCHH~ resref = ~C0BDDA3~ label = ~Mold Touch visual effect~ END
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/idmold.PRO~ ~override/C0BDDP3.PRO~
+ADD_PROJECTILE ~override/C0BDDP3.PRO~ ~Darkbloom Mold Touch~
+// Each opcode-78 tick applies this sub-spell, which spreads the mold.
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/sppr326b.SPL~ ~override/C0BDDS3B.SPL~
+  LPF C0_BW_SPL_PRIVATE_FALLBACK
+    INT_VAR projectile = C0BDDP3
+    STR_VAR identity = ~SPPR326B~ destination = ~C0BDDS3B~ subspell = ~C0BDDS3B~ label = ~Mold Touch sub-spell~
+  END
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR326.SPL~ ~override/C0BDDS3.SPL~
+  LPF C0_BW_SPL_PRIVATE_FALLBACK
+    INT_VAR spell_type = 1 spell_level = 3
+    STR_VAR identity = ~SPPR326~ destination = ~C0BDDS3~ subspell = ~C0BDDS3B~ label = ~Mold Touch~
+  END
+  LPF ALTER_EFFECT INT_VAR match_opcode = 215 // play visual effect
+    STR_VAR match_resource = ~MTOUCHH~ resource = ~C0BDDV3~ END
 SAY NAME1 ~Mold Touch~
 SAY UNIDENTIFIED_DESC ~Mold Touch
 (Alteration)
@@ -295,25 +320,24 @@ If the Saving Throw is successful, the damage is reduced as follows:
 Each round after the first, the nearest creature within 10 ft. of the victim must make a Save vs. Spell or be infected by the mold at full strength. This process continues until the mold fails to infect a suitable host in time. Creatures already under the effects of the mold cannot contract it again. The brown mold quickly dies once the spell expires.~
 END
 // Thorn Spray
-ACTION_IF FILE_EXISTS_IN_GAME ~SPPR427.SPL~ THEN BEGIN
-COPY_EXISTING ~SPPR427.spl~ ~override/C0BDDS4.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 4
+LAF C0_BW_IMPORT_PRIEST_SPELL
+  INT_VAR spell_type = 1 spell_level = 4 required = 0
+  STR_VAR symbol = ~CLERIC_THORN_SPRAY~ destination = ~C0BDDS4~ label = ~Thorn Spray~
+  RET imported
 END
-ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPPR427.SPL~ THEN BEGIN
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR427B.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR427C.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/tsprayt.BAM~ ~override~
-ADD_PROJECTILE ~%MOD_FOLDER%/darkbloom/BGEE/idpro303.PRO~ ~Thorn Spray~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR427.spl~ ~override/C0BDDS4.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 4
-READ_LONG 0x64 "abil_off"
-READ_SHORT 0x68 "abil_num"
-SET "delta" = 0
-FOR (index = 0; index < abil_num; index = index + 1) BEGIN
-WRITE_SHORT (%abil_off% + (0x28 * %index%) + 0x26) ~%idpro303%~
-END
+ACTION_IF NOT imported BEGIN
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR427B.BAM~ ~override/C0BDDS4B.BAM~
+     ~%MOD_FOLDER%/darkbloom/BGEE/SPPR427C.BAM~ ~override/C0BDDS4C.BAM~
+     ~%MOD_FOLDER%/darkbloom/BGEE/tsprayt.BAM~ ~override/C0BDDA4.BAM~
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/IDPRO303.PRO~ ~override/C0BDDP4.PRO~
+  LPF C0_BW_REPLACE_RESREF INT_VAR offset = 0x230
+    STR_VAR expected = ~TSPRAYT~ resref = ~C0BDDA4~ label = ~Thorn Spray projectile~ END
+ADD_PROJECTILE ~override/C0BDDP4.PRO~ ~Darkbloom Thorn Spray~
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR427.SPL~ ~override/C0BDDS4.SPL~
+  LPF C0_BW_SPL_PRIVATE_FALLBACK
+    INT_VAR spell_type = 1 spell_level = 4 projectile = C0BDDP4
+    STR_VAR identity = ~SPPR427~ destination = ~C0BDDS4~ label = ~Thorn Spray~
+  END
 SAY NAME1 ~Thorn Spray~
 SAY UNIDENTIFIED_DESC ~Thorn Spray
 (Alteration)
@@ -329,32 +353,31 @@ Saving Throw: 1/2
 By means of this spell, the caster can cause a spray of barbs, spikes, thorns, and spines to spring forth from <PRO_HISHER> hand. The thorn spray covers a 17-ft.-long cone, inflicting 2d10 points of piercing damage to all creatures within the area of effect, or 1d10 points of damage if a Save vs. Death is successful.~
 END
 // Insect Plague
-COPY_EXISTING ~SPPR517.spl~ ~override/C0BDDS5.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 5
+LAF C0_BW_IMPORT_PRIEST_SPELL
+  INT_VAR spell_type = 1 spell_level = 5
+  STR_VAR symbol = ~CLERIC_INSECT_PLAGUE~ destination = ~C0BDDS5~ label = ~Insect Plague~
+END
 // Fire Seeds
-COPY_EXISTING ~SPPR606.spl~ ~override/C0BDDS6.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 6
+LAF C0_BW_IMPORT_PRIEST_SPELL
+  INT_VAR spell_type = 1 spell_level = 6
+  STR_VAR symbol = ~CLERIC_FIRE_SEEDS~ destination = ~C0BDDS6~ label = ~Fire Seeds~
+END
 // Mist of Eldath
-ACTION_IF FILE_EXISTS_IN_GAME ~SPPR736.SPL~ THEN BEGIN
-COPY_EXISTING ~SPPR736.spl~ ~override/C0BDDS7.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 7
+LAF C0_BW_IMPORT_PRIEST_SPELL
+  INT_VAR spell_type = 1 spell_level = 7 required = 0
+  STR_VAR symbol = ~CLERIC_MIST_OF_ELDATH~ destination = ~C0BDDS7~ label = ~Mist of Eldath~
+  RET imported
 END
-ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPPR736.SPL~ THEN BEGIN
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR736B.BAM~ ~override~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR736C.BAM~ ~override~
-ADD_PROJECTILE ~%MOD_FOLDER%/darkbloom/BGEE/idpro307.PRO~ ~Mist of Eldath~
-COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR736.spl~ ~override/C0BDDS7.spl~
-WRITE_SHORT 0x1C 1
-WRITE_LONG 0x34 7
-READ_LONG 0x64 "abil_off"
-READ_SHORT 0x68 "abil_num"
-SET "delta" = 0
-FOR (index = 0; index < abil_num; index = index + 1) BEGIN
-WRITE_SHORT (%abil_off% + (0x28 * %index%) + 0x26) ~%idpro307%~
-END
+ACTION_IF NOT imported BEGIN
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR736B.BAM~ ~override/C0BDDS7B.BAM~
+     ~%MOD_FOLDER%/darkbloom/BGEE/SPPR736C.BAM~ ~override/C0BDDS7C.BAM~
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/IDPRO307.PRO~ ~override/C0BDDP7.PRO~
+ADD_PROJECTILE ~override/C0BDDP7.PRO~ ~Darkbloom Mist of Eldath~
+COPY ~%MOD_FOLDER%/darkbloom/BGEE/SPPR736.SPL~ ~override/C0BDDS7.SPL~
+  LPF C0_BW_SPL_PRIVATE_FALLBACK
+    INT_VAR spell_type = 1 spell_level = 7 projectile = C0BDDP7
+    STR_VAR identity = ~SPPR736~ destination = ~C0BDDS7~ label = ~Mist of Eldath~
+  END
 SAY NAME1 ~Mist of Eldath~
 SAY UNIDENTIFIED_DESC ~Mist of Eldath
 (Invocation)
