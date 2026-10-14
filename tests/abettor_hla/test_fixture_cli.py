@@ -91,7 +91,7 @@ class DisposableFixtureCliTests(unittest.TestCase):
             verify(fixture)
 
     def test_builder_refuses_each_reserved_output_collision(self) -> None:
-        for name in ("C0ABIVI.SPL", "C0ABIVS.EFF", "C0ABIVE.EFF"):
+        for name in ("C0ABIVI.SPL", "C0ABIVS.EFF"):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 source = root / "source-game"

@@ -14,7 +14,7 @@ import unittest
 
 from .ie_resources import parse_spl, read_eff_resource
 from .test_tail_patch_integration import tlk_string, tlk_with_original_description
-from .test_weidu_finite_integration import HLA_TABLE
+from .test_weidu_finite_integration import HLA_TABLE, is_finale, song_ticks
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,7 +54,7 @@ class Component2004ProducerTests(unittest.TestCase):
         library = root / "testmod" / "lib"
         library.mkdir(parents=True)
         shutil.copytree(MOD / "bardsong", root / "testmod" / "bardsong")
-        for name in ("bardsongtweaks.tpa", "hla_actions.tpa"):
+        for name in ("bardsongtweaks.tpa", "functions.tph", "hla_actions.tpa"):
             shutil.copy2(MOD / "lib" / name, library / name)
         shutil.copy2(MOD / "lib" / "abettor_hla_finite.tpa", library / "finite_actual.tpa")
         # Capture what the unchanged producer actually emits immediately before
@@ -93,7 +93,8 @@ class Component2004ProducerTests(unittest.TestCase):
         )
         (root / "testmod" / "setup-test.tp2").write_text(
             "BACKUP ~testmod/backup~\nAUTHOR ~test~\n"
-            "ALWAYS\n INCLUDE ~testmod/lib/hla_actions.tpa~\nEND\n"
+            # As in the main TP2, functions.tph replaces WeiDU's ADD_SPELL_EFFECT.
+            "ALWAYS\n INCLUDE ~testmod/lib/functions.tph~\n INCLUDE ~testmod/lib/hla_actions.tpa~\nEND\n"
             "LANGUAGE ~English~ ~english~\n"
             "BEGIN ~Bard Song Mechanics Tweak producer regression~ DESIGNATED 2004\n"
             + allocator_seed +
@@ -150,16 +151,24 @@ class Component2004ProducerTests(unittest.TestCase):
                     self.assertEqual(old.projectile, new.projectile)
                     self.assertEqual(old.required_level, new.required_level)
                     starts = [effect for effect in new.effects if effect.resource == "C0ABIVS"]
-                    ends = [effect for effect in new.effects if effect.resource == "C0ABIVE"]
+                    ends = [effect for effect in new.effects if effect.resource == "C0ABIVI"]
                     self.assertEqual(1, len(starts))
                     self.assertEqual(1, len(ends))
                     self.assertTrue(starts[0].matches(opcode=177, target=9, timing=1, duration=0))
-                    duration = next(effect.duration for effect in old.effects if effect.resource == "C0SINGI2")
+                    duration = song_ticks(old, payload)
                     self.assertEqual(600 + index * 100, duration)
                     self.assertEqual(1 if index == 0 else index * 5, new.required_level)
-                    self.assertTrue(ends[0].matches(opcode=272, target=9, timing=10, duration=duration, parameter1=6, parameter2=3, special=40))
-                    retained = tuple(record for record in after_headers[index] if record[0x14:0x1C].split(b"\0", 1)[0] not in (b"C0ABIVS", b"C0ABIVE"))
+                    self.assertTrue(is_finale(ends[0], duration), ends[0])
+                    retained = tuple(record for record in after_headers[index] if record[0x14:0x1C].split(b"\0", 1)[0] not in (b"C0ABIVS", b"C0ABIVI"))
                     self.assertEqual(before_headers[index], retained)
+                # Each finale waits for its own song: 40 seconds at the first
+                # level, 107 at the last.
+                self.assertEqual(
+                    [40, 47, 54, 60, 67, 74, 80, 87, 94, 100, 107],
+                    [effect.duration for effect in patched.find_effects(resource="C0ABIVI")],
+                )
+                self.assertEqual((), patched.find_effects(resource="C0ABIVE"))
+                self.assertFalse((after / "C0ABIVE.EFF").exists())
                 self.assertEqual(resource(before, f"{payload}.SPL").read_bytes(), resource(after, f"{payload}.SPL").read_bytes())
                 self.assertEqual(resource(before, "C0BARDSX.SPL").read_bytes(), resource(after, "C0BARDSX.SPL").read_bytes())
                 cooldown = parse_spl(resource(after, "C0BARDSX.SPL"))

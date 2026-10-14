@@ -58,9 +58,11 @@ class TailPatchStaticContractTests(unittest.TestCase):
         for token in (
             "C0ABIVI",
             "C0ABIVS",
-            "C0ABIVE",
             "match_resource = C0SINGIN",
-            "match_resource = C0SINGI2",
+            "LPF C0_ADD_ABETTOR_FINALE",
+            "opcode = 326",
+            "timing = 4",
+            "resource = C0ABIVI",
             "COPY_EXISTING ~C0ABETHL.SPL~",
             "SAY NAME1 ~Symphony of the Dark Children~",
             "SAY NAME2 ~Symphony of the Dark Children~",
@@ -69,6 +71,9 @@ class TailPatchStaticContractTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, self.patch)
 
+        # The finale is not cloned from the disabled-singer check.
+        self.assertNotIn("match_resource = C0SINGI2", self.patch)
+        self.assertNotIn("C0ABIVE.EFF", self.patch)
         self.assertNotIn("STRING_SET_EVALUATE", self.patch)
 
     def test_readme_requires_last_position_closed_game_and_confirmed_target(self) -> None:

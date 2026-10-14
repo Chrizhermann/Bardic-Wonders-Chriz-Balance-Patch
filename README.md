@@ -29,15 +29,18 @@ A personal balance-patch fork of [Bardic Wonders](https://github.com/TheArtisanB
 >
 > **Symphony of the Dark Children** is described as giving affected party
 > members one round of ordinary Invisibility when the song begins and when it
-> ends. Resource inspection confirms that the ending is not implemented as
-> described. Its hook is a copy of a Bard Song Mechanics Tweak check that runs
-> every round while the song lasts and fires only while the singer is asleep,
-> panicked, stunned, helpless, silenced, charmed, feebleminded or confused.
-> Nothing happens when the song runs out, and a disabled singer gives the party
-> Invisibility every round. The opening hook is in place but has not been
-> verified in the engine. The remaining song changes are usable as released;
-> the invisibility behavior is tracked separately in [issue
-> #5](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5).
+> ends. In released versions through `v2.9c-balance.7` the ending is not
+> implemented as described. Its hook is a copy of a Bard Song Mechanics Tweak
+> check that runs every round while the song lasts and fires only while the
+> singer is asleep, panicked, stunned, helpless, silenced, charmed,
+> feebleminded or confused. Nothing happens when the song runs out, and a
+> disabled singer gives the party Invisibility every round.
+>
+> The development branch replaces that hook with a real ending (see
+> [Symphony ending](#symphony-ending-unreleased)). Neither the opening nor the
+> new ending has been verified in the engine yet. The remaining song changes
+> are usable as released; the invisibility behavior is tracked separately in
+> [issue #5](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5).
 
 ## Credit & original author
 
@@ -61,7 +64,7 @@ This fork exists strictly because I wanted a few balance knobs turned differentl
 | **Legionnaire's March** (HLA) | Base THAC0 0→+3 to hit; duration 1 turn→3 rounds; retains +4 damage, non-warrior fighter APR progression and three selections | Bounds the accuracy bonus instead of granting the whole party endgame fighter accuracy |
 | **Song of Freedom** (HLA) | Removed 1-turn immunity, kept AoE cleanse | The AoE dispel is already a strong HLA; blanket immunity on top was redundant |
 | **Warsong of the Undying** (Skald HLA) | Singer and allies gain +5 AC and +15% to all resistances; allies gain +3 to hit and damage. Haste and immunities unchanged. | Keeps the enhanced song's defensive benefits without increasing the level-20 song's attack and damage bonuses |
-| **Symphony of the Dark Children** (Abettor HLA) | Removed the +6 Luck/damage-luck, extra AC/vs.-Good, backstab-immunity, random-invisibility, and Time Stop package; reduced total save bonus from +5 to +1; intended one-round party Invisibility at song start/end | Keeps the core shadow-song identity without the unrelated singer-only power stack; start/end party Invisibility remains a [known issue](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5) |
+| **Symphony of the Dark Children** (Abettor HLA) | Removed the +6 Luck/damage-luck, extra AC/vs.-Good, backstab-immunity, random-invisibility, and Time Stop package; reduced total save bonus from +5 to +1; one round of party Invisibility at song start and end | Keeps the core shadow-song identity without the unrelated singer-only power stack; the released ending does not work, and its unreleased fix is not yet checked in-game ([known issue](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5)) |
 | **Dancer** (component 1005) | Halved passive and song AC bonuses, rounding passive totals down; normal song AC +1/+2/+3/+4/+5; Swift-As-Flowing-Water AC +20→+10 and hit/damage +8→+5 | Reduces defense across the kit and keeps enhanced song hit/damage at the normal level-21 value |
 | **Piercing Mockery** (Jester song, component `1002`) | AC penalties at levels 1/10/15/20: -2/-2/-3/-4; miscast chances: 12/20/27/27% | Keeps the base AC penalty and halves later scaling; halves miscast chances, rounding down to whole percentages |
 | **The Fool's Journey** (Jester HLA) | Enemy AC penalty -6, miscast 35%, critical miss modifier +3; singer AC bonus +5, +10 total against ranged attacks | Reduces the enhanced song's debuffs and personal defense; enemies still cannot critically hit |
@@ -193,6 +196,26 @@ development branch now implements the follow-up; see
 
 The warning above stays until these changes are released and checked in a
 Spell Revisions game.
+
+### Symphony ending (unreleased)
+
+Component `2004` now ends every Symphony activation with its own round of
+party Invisibility once that activation's song runs out: 40 seconds after it
+starts at Bard level 1, rising to 107 seconds from level 50. A partial second
+rounds up, so the Invisibility never comes before the song has ended. If the
+Abettor sings again before an earlier song is over, the earlier song still
+ends with its own Invisibility while the new one plays. The Bard Song
+Mechanics Tweak's disabled-singer check is left unchanged and no longer grants
+Invisibility.
+
+Standalone tail **1.2.0** applies the same ending. A playthrough with tail
+1.1.0 can reinstall it as 1.2.0. The tail still refuses playthroughs whose
+component `2004` added the Symphony hooks itself (`v2.9c-balance.5` to `.7`);
+there is no repair for those yet.
+
+WeiDU fixtures check one opening and one ending per song level, the delay
+for each song length, preservation of the other song effects, and exact
+restoration on uninstall. The ending has not been verified in the engine.
 
 ## Acknowledgments
 

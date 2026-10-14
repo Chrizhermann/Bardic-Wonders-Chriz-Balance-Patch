@@ -11,7 +11,9 @@ import unittest
 
 from .ie_resources import SYNTHETIC_KEY, parse_spl, read_controller_payload
 from .test_patcher import effect_bytes, legacy_mutable_effects, spell_bytes
-from .test_weidu_finite_integration import controller_bytes
+from .test_weidu_finite_integration import (
+    controller_bytes, finale_effect, is_finale, opening_effect, song_ticks,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -177,6 +179,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
         controller_decoy_resource: str = "C0SINGIN",
         controller_decoy_end_duration: int | None = None,
         controller_decoy_end_resource: str = "C0SINGI2",
+        controller_extra_effects: tuple[bytes, ...] = (),
         controller_projectile: int = 559,
         registered_projectile: int = 558,
     ) -> None:
@@ -203,6 +206,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 extra_start_resource=controller_decoy_resource,
                 extra_end_duration=controller_decoy_end_duration,
                 extra_end_resource=controller_decoy_end_resource,
+                extra_effects=controller_extra_effects,
             )
             if finite
             else overpowered_payload()
@@ -301,8 +305,15 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 self.assertEqual(11, len(new_controller.abilities))
                 for old, new in zip(old_controller.abilities, new_controller.abilities):
                     self.assertEqual(projectile, new.projectile)
-                    self.assertEqual(list(old.effects), [e for e in new.effects if e.resource not in {"C0ABIVS", "C0ABIVE"}])
+                    self.assertEqual(list(old.effects), [e for e in new.effects if e.resource not in {"C0ABIVS", "C0ABIVI"}])
                     self.assertEqual(len(old.effects) + 2, len(new.effects))
+                    finales = [e for e in new.effects if e.resource == "C0ABIVI"]
+                    self.assertEqual(1, len(finales))
+                    self.assertTrue(is_finale(finales[0], song_ticks(new, payload)), finales[0])
+                self.assertEqual(
+                    [40, 47, 54, 60, 67, 74, 80, 87, 94, 100, 107],
+                    [e.duration for e in new_controller.find_effects(resource="C0ABIVI")],
+                )
                 uninstall = self.weidu(root, "uninstall")
                 self.assertEqual(0, uninstall.returncode, uninstall.stdout + uninstall.stderr)
                 self.assertEqual(before, {p.name: p.read_bytes() for p in override.iterdir()})
@@ -344,6 +355,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 override / "SHARED.SPL",
             )
             before = {path: sha256(path) for path in tracked}
+            end_check = sha256(override / "C0SINGI2.EFF")
             before_tlk_entries = tlk_entries(root / "dialog.tlk")
             prior_components = component_ids(root / "WeiDU.log")
 
@@ -392,24 +404,13 @@ class TailPatchIntegrationTests(unittest.TestCase):
                         for effect in ability.effects
                     ),
                 )
-                self.assertEqual(
-                    1,
-                    sum(
-                        effect.matches(
-                            opcode=272,
-                            target=9,
-                            power=0,
-                            parameter1=6,
-                            parameter2=3,
-                            timing=10,
-                            probability1=100,
-                            probability2=0,
-                            resource="C0ABIVE",
-                            special=40,
-                        )
-                        for effect in ability.effects
-                    ),
-                )
+                finales = [effect for effect in ability.effects if effect.resource == "C0ABIVI"]
+                self.assertEqual(1, len(finales))
+                self.assertTrue(is_finale(finales[0], song_ticks(ability, PAYLOAD_RESREF)), finales[0])
+            self.assertEqual([40, 47], [e.duration for e in controller.find_effects(resource="C0ABIVI")])
+            self.assertEqual((), controller.find_effects(resource="C0ABIVE"))
+            self.assertFalse((override / "C0ABIVE.EFF").exists())
+            self.assertEqual(end_check, sha256(override / "C0SINGI2.EFF"))
             invisibility = parse_spl(override / "C0ABIVI.SPL")
             self.assertEqual(5, invisibility.spell_type)
             self.assertEqual(5, invisibility.abilities[0].target)
@@ -426,14 +427,10 @@ class TailPatchIntegrationTests(unittest.TestCase):
                     duration=6,
                 )
             )
-            for donor_name, clone_name in (
-                ("C0SINGIN.EFF", "C0ABIVS.EFF"),
-                ("C0SINGI2.EFF", "C0ABIVE.EFF"),
-            ):
-                donor = bytearray((override / donor_name).read_bytes())
-                clone = bytearray((override / clone_name).read_bytes())
-                donor[0x30:0x38] = clone[0x30:0x38]
-                self.assertEqual(donor, clone)
+            donor = bytearray((override / "C0SINGIN.EFF").read_bytes())
+            clone = bytearray((override / "C0ABIVS.EFF").read_bytes())
+            donor[0x30:0x38] = clone[0x30:0x38]
+            self.assertEqual(donor, clone)
 
             hla_data = (override / "C0ABETHL.SPL").read_bytes()
             description_strref = struct.unpack_from("<I", hla_data, 0x50)[0]
@@ -503,26 +500,30 @@ class TailPatchIntegrationTests(unittest.TestCase):
             log = (root / "WeiDU.log").read_text(encoding="utf-8")
             self.assertNotIn("SETUP-ABETTORHLAREBALANCE.TP2", log.upper())
 
-    def test_drifted_end_hook_condition_is_refused_before_any_resource_write(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.make_fixture(root)
-            override = root / "override"
-            end_hook = override / "C0SINGI2.EFF"
-            data = bytearray(end_hook.read_bytes())
-            struct.pack_into("<i", data, 0x1C, -2146422738)
-            end_hook.write_bytes(data)
-            tracked = tuple(override.iterdir()) + (root / "dialog.tlk",)
-            before = {path: sha256(path) for path in tracked}
+    def test_finale_does_not_depend_on_the_disabled_singer_eff(self) -> None:
+        for case in ("changed", "missing"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root)
+                override = root / "override"
+                end_check = override / "C0SINGI2.EFF"
+                if case == "changed":
+                    data = bytearray(end_check.read_bytes())
+                    struct.pack_into("<i", data, 0x1C, -2146422738)
+                    end_check.write_bytes(data)
+                    before = sha256(end_check)
+                else:
+                    end_check.unlink()
 
-            install = self.weidu(root, "install")
+                install = self.weidu(root, "install")
 
-            self.assertNotEqual(0, install.returncode)
-            self.assertIn("recognized finite-song contract", install.stdout + install.stderr)
-            self.assertEqual(before, {path: sha256(path) for path in tracked})
-            self.assertFalse((override / "C0ABIVI.SPL").exists())
-            log = (root / "WeiDU.log").read_text(encoding="utf-8")
-            self.assertNotIn("SETUP-ABETTORHLAREBALANCE.TP2", log.upper())
+                self.assertEqual(0, install.returncode, install.stdout + install.stderr)
+                controller = parse_spl(override / "C0ABETS2.SPL")
+                self.assertEqual(2, len(controller.find_effects(opcode=326, timing=4, resource="C0ABIVI")))
+                if case == "changed":
+                    self.assertEqual(before, sha256(end_check))
+                else:
+                    self.assertFalse(end_check.exists())
 
     def test_drifted_hook_timing_is_refused_before_any_resource_write(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -679,18 +680,24 @@ class TailPatchIntegrationTests(unittest.TestCase):
                         sum(effect.resource == "C0ABIVS" for effect in ability.effects),
                     )
 
-    def test_zero_duration_end_selector_duplicate_is_refused_before_writes(self) -> None:
+    def test_extra_end_check_variant_is_kept_and_does_not_block_the_finale(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_fixture(root, controller_decoy_end_duration=0)
             override = root / "override"
-            tracked = tuple(override.iterdir()) + (root / "dialog.tlk",)
-            before = {path: sha256(path) for path in tracked}
 
             install = self.weidu(root, "install")
 
-            self.assertNotEqual(0, install.returncode)
-            self.assertEqual(before, {path: sha256(path) for path in tracked})
+            self.assertEqual(0, install.returncode, install.stdout + install.stderr)
+            controller = parse_spl(override / "C0ABETS2.SPL")
+            for ability in controller.abilities:
+                finales = [effect for effect in ability.effects if effect.resource == "C0ABIVI"]
+                self.assertEqual(1, len(finales))
+                self.assertTrue(is_finale(finales[0], song_ticks(ability, PAYLOAD_RESREF)))
+                self.assertEqual(
+                    1,
+                    sum(effect.matches(opcode=272, resource="C0SINGI2", duration=0) for effect in ability.effects),
+                )
 
     def test_malformed_preexisting_hook_references_are_refused_before_writes(self) -> None:
         cases = (
@@ -698,6 +705,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 "controller_decoy_probability": 50,
                 "controller_decoy_resource": "C0ABIVS",
             },
+            # The end hook of earlier releases.
             {
                 "controller_decoy_end_duration": 0,
                 "controller_decoy_end_resource": "C0ABIVE",
@@ -706,6 +714,9 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 "controller_decoy_probability": 50,
                 "controller_decoy_resource": "C0ABIVI",
             },
+            # A finale without an opening, and a controller that already has both.
+            {"controller_extra_effects": (finale_effect(40),)},
+            {"controller_extra_effects": (opening_effect(), finale_effect(40))},
         )
         for fixture_kwargs in cases:
             with self.subTest(fixture_kwargs=fixture_kwargs), tempfile.TemporaryDirectory() as directory:
@@ -801,8 +812,29 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 self.assertNotEqual(0, install.returncode)
                 self.assertEqual(before, {path: sha256(path) for path in tracked})
 
+    def test_existing_c0abive_eff_is_left_alone(self) -> None:
+        # Earlier releases created C0ABIVE.EFF; this one neither needs nor writes it.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root)
+            other = root / "override" / "C0ABIVE.EFF"
+            other.write_bytes(b"unrelated resource")
+
+            install = self.weidu(root, "install")
+
+            self.assertEqual(0, install.returncode, install.stdout + install.stderr)
+            self.assertEqual(b"unrelated resource", other.read_bytes())
+            controller = parse_spl(root / "override" / "C0ABETS2.SPL")
+            self.assertEqual((), controller.find_effects(resource="C0ABIVE"))
+            self.assertEqual(2, len(controller.find_effects(resource="C0ABIVI")))
+
+            uninstall = self.weidu(root, "uninstall")
+
+            self.assertEqual(0, uninstall.returncode, uninstall.stdout + uninstall.stderr)
+            self.assertEqual(b"unrelated resource", other.read_bytes())
+
     def test_reserved_output_collision_is_refused_before_any_resource_write(self) -> None:
-        for name in ("C0ABIVI.SPL", "C0ABIVS.EFF", "C0ABIVE.EFF"):
+        for name in ("C0ABIVI.SPL", "C0ABIVS.EFF"):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 self.make_fixture(root)

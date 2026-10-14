@@ -316,7 +316,6 @@ BEGIN
           SET generic_start_count = 0
           SET generic_repeat_count = 0
           SET generic_end_count = 0
-          SET generic_end_selector_count = 0
           SET reset_count = 0
           SET cast_count = 0
           SET cooldown_count = 0
@@ -324,8 +323,9 @@ BEGIN
           SET payload_repeat_count = 0
           SET start_hook_count = 0
           SET end_hook_count = 0
+          SET end_hook_delay = 0
           SET start_hook_resource_count = 0
-          SET end_hook_resource_count = 0
+          SET legacy_end_hook_resource_count = 0
           SET direct_invisibility_resource_count = 0
           SET once_duration = 0
           SET repeat_duration = 0
@@ -357,11 +357,13 @@ BEGIN
 
             // Reserved hook resources must not already appear in a partial or
             // malformed state that the exact semantic counters would ignore.
+            // C0ABIVE was the end hook of earlier releases; a controller that
+            // still uses it is not patched again.
             PATCH_IF (~%resource%~ STRING_EQUAL_CASE ~C0ABIVS~) BEGIN
               SET start_hook_resource_count += 1
             END
             PATCH_IF (~%resource%~ STRING_EQUAL_CASE ~C0ABIVE~) BEGIN
-              SET end_hook_resource_count += 1
+              SET legacy_end_hook_resource_count += 1
             END
             PATCH_IF (~%resource%~ STRING_EQUAL_CASE ~C0ABIVI~) BEGIN
               SET direct_invisibility_resource_count += 1
@@ -444,24 +446,6 @@ BEGIN
             BEGIN
               SET generic_end_count += 1
               SET end_duration = duration
-            END
-            // CLONE_EFFECT cannot match the donor's dynamic duration.  Refuse
-            // any second effect that its otherwise-exact selector could clone.
-            PATCH_IF
-              (inherited_fields_valid = 1)
-              AND
-              (opcode = 272)
-              AND (target = 9)
-              AND (power = 0)
-              AND (parameter1 = 6)
-              AND (parameter2 = 3)
-              AND (timing = 10)
-              AND (probability1 = 100)
-              AND (probability2 = 0)
-              AND (~%resource%~ STRING_EQUAL_CASE ~C0SINGI2~)
-              AND (special = 40)
-            BEGIN
-              SET generic_end_selector_count += 1
             END
             PATCH_IF
               (inherited_fields_valid = 1)
@@ -548,29 +532,29 @@ BEGIN
             BEGIN
               SET start_hook_count += 1
             END
+            // The finale: party Invisibility once this activation's song has
+            // run out (see C0_ADD_ABETTOR_FINALE).
             PATCH_IF
               (inherited_fields_valid = 1)
-              AND
-              (opcode = 272)
+              AND (opcode = 326)
               AND (target = 9)
-              AND (power = 0)
-              AND (parameter1 = 6)
-              AND (parameter2 = 3)
-              AND (timing = 10)
+              AND (parameter1 = 0)
+              AND (parameter2 = 0)
+              AND (timing = 4)
               AND (duration > 0)
               AND (probability1 = 100)
               AND (probability2 = 0)
-              AND (~%resource%~ STRING_EQUAL_CASE ~C0ABIVE~)
-              AND (special = 40)
+              AND (~%resource%~ STRING_EQUAL_CASE ~C0ABIVI~)
+              AND (special = 0)
             BEGIN
               SET end_hook_count += 1
+              SET end_hook_delay = duration
             END
           END
           PATCH_IF
             (generic_start_count = 1)
             AND (generic_repeat_count = 1)
             AND (generic_end_count = 1)
-            AND (generic_end_selector_count = 1)
             AND (reset_count = 1)
             AND (cast_count = 1)
             AND (cooldown_count = 1)
@@ -578,13 +562,14 @@ BEGIN
             AND (payload_repeat_count = 1)
             AND (start_hook_resource_count = expected_start_hooks)
             AND (start_hook_count = expected_start_hooks)
-            AND (end_hook_resource_count = expected_end_hooks)
+            AND (legacy_end_hook_resource_count = 0)
             AND (end_hook_count = expected_end_hooks)
-            AND (direct_invisibility_resource_count = 0)
+            AND (direct_invisibility_resource_count = expected_end_hooks)
             AND (once_duration = repeat_duration)
             AND (repeat_duration = end_duration)
             AND (end_duration = generic_repeat_duration)
             AND (generic_repeat_duration = cooldown_duration)
+            AND ((expected_end_hooks = 0) OR (end_hook_delay = ((repeat_duration + 14) / 15)))
           BEGIN
             SET valid_headers += 1
           END
@@ -593,6 +578,64 @@ BEGIN
       PATCH_IF (global_effects_valid = 1) AND (valid_headers = ability_count) BEGIN
         SET valid = 1
       END
+    END
+  END
+END
+
+// Add the finale to every controller header: party Invisibility (C0ABIVI)
+// once that activation's song has run out. Each cast of the controller carries
+// its own finale, so an earlier song still ends with Invisibility while a
+// newer one plays. Timing mode 4 delays in whole seconds and the song lasts a
+// number of ticks (15 per second), so the delay is rounded up and the finale
+// never comes before the song has run out. Call only on a controller that
+// C0_VALIDATE_ABETTOR_FINITE_CONTROLLER accepted.
+DEFINE_PATCH_FUNCTION C0_ADD_ABETTOR_FINALE
+  STR_VAR
+    payload = ~~
+BEGIN
+  READ_SHORT 0x68 finale_header_count
+  FOR (finale_header = 0; finale_header < finale_header_count; ++finale_header) BEGIN
+    // Each added effect moves the ones after it, so read the offsets again.
+    READ_LONG 0x64 finale_ability_offset
+    READ_LONG 0x6a finale_effect_offset
+    SET finale_header_offset = finale_ability_offset + finale_header * 0x28
+    READ_SHORT (finale_header_offset + 0x1e) finale_effect_count
+    READ_SHORT (finale_header_offset + 0x20) finale_first_effect
+    SET finale_song_duration = 0
+    FOR (finale_index = finale_first_effect; finale_index < (finale_first_effect + finale_effect_count); ++finale_index) BEGIN
+      SET finale_effect = finale_effect_offset + finale_index * 0x30
+      READ_SHORT finale_effect finale_opcode
+      READ_BYTE (finale_effect + 0x0c) finale_timing
+      READ_LONG (finale_effect + 0x0e) finale_duration
+      READ_ASCII (finale_effect + 0x14) finale_resource (8) NULL
+      PATCH_IF
+        (finale_opcode = 272)
+        AND (finale_timing = 10)
+        AND (~%finale_resource%~ STRING_EQUAL_CASE ~%payload%~)
+      BEGIN
+        SET finale_song_duration = finale_duration
+      END
+    END
+    LPF ADD_SPELL_EFFECT
+      INT_VAR
+        header = finale_header + 1
+        opcode = 326
+        target = 9
+        power = 0
+        parameter1 = 0
+        parameter2 = 0
+        timing = 4
+        resist_dispel = 0
+        duration = (finale_song_duration + 14) / 15
+        probability1 = 100
+        probability2 = 0
+        dicenumber = 0
+        dicesize = 0
+        savingthrow = 0
+        savebonus = 0
+        special = 0
+      STR_VAR
+        resource = C0ABIVI
     END
   END
 END
@@ -1340,7 +1383,6 @@ ACTION_IF
   OR !(FILE_EXISTS_IN_GAME ~C0ABETS2.SPL~)
   OR !(FILE_EXISTS_IN_GAME ~C0SINGIN.SPL~)
   OR !(FILE_EXISTS_IN_GAME ~C0SINGIN.EFF~)
-  OR !(FILE_EXISTS_IN_GAME ~C0SINGI2.EFF~)
 BEGIN
   FAIL ~Required Abettor finite-song resources are missing; no changes were made.~
 END
@@ -1348,7 +1390,6 @@ END
 ACTION_IF
   (FILE_EXISTS_IN_GAME ~C0ABIVI.SPL~)
   OR (FILE_EXISTS_IN_GAME ~C0ABIVS.EFF~)
-  OR (FILE_EXISTS_IN_GAME ~C0ABIVE.EFF~)
 BEGIN
   FAIL ~Reserved Abettor Invisibility resources already exist; no changes were made.~
 END
@@ -1468,24 +1509,6 @@ COPY_EXISTING ~C0SINGIN.EFF~ ~override~
   END
 BUT_ONLY
 
-OUTER_SET c0_abettor_end_template_valid = 0
-COPY_EXISTING ~C0SINGI2.EFF~ ~override~
-  LPF C0_VALIDATE_ABETTOR_HOOK_TEMPLATE
-    INT_VAR
-      expected_parameter1 = (0 - 2146422739)
-      expected_parameter2 = 138
-    STR_VAR
-      expected_resource = ~C0SINGI2~
-    RET
-      template_valid = valid
-  END
-  PATCH_IF (template_valid = 1) BEGIN
-    INNER_ACTION BEGIN
-      OUTER_SET c0_abettor_end_template_valid = 1
-    END
-  END
-BUT_ONLY
-
 OUTER_SET c0_abettor_hla_valid = 0
 OUTER_SET c0_abettor_c0bwhlab_before = 0
 OUTER_SET c0_abettor_description_strref = "-1"
@@ -1510,7 +1533,6 @@ ACTION_IF
   OR (c0_abettor_controller_valid != 1)
   OR (c0_abettor_spell_template_valid != 1)
   OR (c0_abettor_start_template_valid != 1)
-  OR (c0_abettor_end_template_valid != 1)
   OR (c0_abettor_hla_valid != 1)
   OR (c0_abettor_description_strref < 0)
 BEGIN
@@ -1544,9 +1566,6 @@ COPY_EXISTING ~C0SINGIN.SPL~ ~override/C0ABIVI.SPL~
 COPY_EXISTING ~C0SINGIN.EFF~ ~override/C0ABIVS.EFF~
   WRITE_ASCIIE 0x30 ~C0ABIVI~ (8)
 
-COPY_EXISTING ~C0SINGI2.EFF~ ~override/C0ABIVE.EFF~
-  WRITE_ASCIIE 0x30 ~C0ABIVI~ (8)
-
 OUTER_SET c0_abettor_post_start_eff_valid = 0
 COPY_EXISTING ~C0ABIVS.EFF~ ~override~
   LPF C0_VALIDATE_ABETTOR_HOOK_TEMPLATE
@@ -1556,20 +1575,6 @@ COPY_EXISTING ~C0ABIVS.EFF~ ~override~
   END
   PATCH_IF (output_valid = 1) BEGIN
     INNER_ACTION BEGIN OUTER_SET c0_abettor_post_start_eff_valid = 1 END
-  END
-BUT_ONLY
-
-OUTER_SET c0_abettor_post_end_eff_valid = 0
-COPY_EXISTING ~C0ABIVE.EFF~ ~override~
-  LPF C0_VALIDATE_ABETTOR_HOOK_TEMPLATE
-    INT_VAR
-      expected_parameter1 = (0 - 2146422739)
-      expected_parameter2 = 138
-    STR_VAR expected_resource = ~C0ABIVI~
-    RET output_valid = valid
-  END
-  PATCH_IF (output_valid = 1) BEGIN
-    INNER_ACTION BEGIN OUTER_SET c0_abettor_post_end_eff_valid = 1 END
   END
 BUT_ONLY
 
@@ -1598,29 +1603,7 @@ COPY_EXISTING ~C0ABETS2.SPL~ ~override~
       match_resource = C0SINGIN
       resource = C0ABIVS
   END
-  LPF CLONE_EFFECT
-    INT_VAR
-      check_headers = 1
-      check_globals = 0
-      silent = 1
-      match_opcode = 272
-      match_target = 9
-      match_power = 0
-      match_parameter1 = 6
-      match_parameter2 = 3
-      match_timing = 10
-      match_probability1 = 100
-      match_probability2 = 0
-      match_resist_dispel = 0
-      match_dicenumber = 0
-      match_dicesize = 0
-      match_savingthrow = 0
-      match_savebonus = 0
-      match_special = 40
-    STR_VAR
-      match_resource = C0SINGI2
-      resource = C0ABIVE
-  END
+  LPF C0_ADD_ABETTOR_FINALE STR_VAR payload = EVAL ~%c0_abettor_payload%~ END
 
 COPY_EXISTING ~C0ABETHL.SPL~ ~override~
   SAY NAME1 ~Symphony of the Dark Children~
@@ -1692,7 +1675,6 @@ ACTION_IF
   OR (c0_abettor_post_controller_valid != 1)
   OR (c0_abettor_post_invisibility_valid != 1)
   OR (c0_abettor_post_start_eff_valid != 1)
-  OR (c0_abettor_post_end_eff_valid != 1)
   OR (c0_abettor_post_hla_valid != 1)
   OR (c0_abettor_c0bsngef_before != c0_abettor_c0bsngef_after)
   OR (c0_abettor_c0bwhlab_before != c0_abettor_c0bwhlab_after)

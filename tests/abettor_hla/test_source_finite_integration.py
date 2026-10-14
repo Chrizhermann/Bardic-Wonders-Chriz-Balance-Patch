@@ -46,7 +46,7 @@ class SourceFiniteIntegrationTests(unittest.TestCase):
         self.assertNotIn("FILE_EXISTS_IN_GAME ~C0ABETS2.EFF~", self.integration)
 
     def test_integration_adds_abettor_only_start_and_end_hooks(self) -> None:
-        for token in ("C0ABIVI", "C0ABIVS", "C0ABIVE", "CLONE_EFFECT"):
+        for token in ("C0ABIVI", "C0ABIVS", "CLONE_EFFECT", "LPF C0_ADD_ABETTOR_FINALE"):
             with self.subTest(token=token):
                 self.assertIn(token, self.integration)
 
@@ -54,10 +54,19 @@ class SourceFiniteIntegrationTests(unittest.TestCase):
             self.integration,
             re.compile(r"match_resource\s*=\s*C0SINGIN.*resource\s*=\s*C0ABIVS", re.DOTALL),
         )
-        self.assertRegex(
-            self.integration,
-            re.compile(r"match_resource\s*=\s*C0SINGI2.*resource\s*=\s*C0ABIVE", re.DOTALL),
+        finale = re.search(
+            r"DEFINE_PATCH_FUNCTION C0_ADD_ABETTOR_FINALE\b.*?\nEND\n",
+            self.integration.replace("\r\n", "\n"),
+            re.DOTALL,
         )
+        self.assertIsNotNone(finale)
+        self.assertRegex(
+            finale[0],
+            re.compile(r"opcode\s*=\s*326.*timing\s*=\s*4.*resource\s*=\s*C0ABIVI", re.DOTALL),
+        )
+        # The finale is not cloned from the disabled-singer check.
+        self.assertNotRegex(self.integration, r"match_resource\s*=\s*C0SINGI2")
+        self.assertNotIn("C0ABIVE.EFF", self.integration)
         self.assertIn("projectile = c0_abettor_party_projectile", self.integration)
         self.assertIn("c0_abettor_controller_projectile = c0bardso", self.integration)
 

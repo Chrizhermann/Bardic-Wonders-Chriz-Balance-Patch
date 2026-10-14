@@ -12,7 +12,8 @@ availability row.
 The user reported successful Bard kit, shared-ability and Abettor playtesting on
 September 16 and approved release. The specific opening/finale party invisibility
 behaviors in issue #5 remain separately unverified. No game was launched or
-modified during this release work.
+modified during this release work. The finale hook counted below was later found
+not to fire when the song ends; see [Finale replacement](#finale-replacement-unreleased).
 
 The authoritative attempt-owned log is
 `.chriz/attempts/attempt-7da66eb7040f78cca7c1/steps/0091-c73ec1a85870a6db/attempt-0001/stdout.log`:
@@ -110,3 +111,27 @@ Collection source pins and archive hashes must be updated separately to consume
 this release; no collection configuration or completed game installation is
 changed by publishing it. Test start/end party invisibility independently before
 closing issue #5.
+
+## Finale replacement (unreleased)
+
+The finale added above was a copy of the per-round disabled-singer check
+(opcode 272 with `C0SINGI2` renamed to `C0ABIVE`). That check runs every six
+seconds while the song lasts and fires only while the singer is disabled, so the
+party got Invisibility every round of a disabled singer and nothing when the song
+ran out. `C0SINGI2.SPL` only removes `FJBARDB` effects and shows a message; the
+song itself keeps running.
+
+Component 2004 and tail **1.2.0** instead add one opcode 326 effect to every
+controller header: target Original Caster, timing 4 (delayed), resource
+`C0ABIVI`, delayed by the header's song duration in seconds, rounded up. Each
+controller cast therefore ends with its own party Invisibility, also while a
+newer cast is playing; the user chose this on October 14. `C0SINGI2.EFF` is no
+longer copied or required, and `C0ABIVE.EFF` is no longer created or reserved.
+The validator still refuses a controller that names `C0ABIVE`, has a finale with
+the wrong delay or fields, or names `C0ABIVI` outside the finale.
+
+The real-producer regression now expects 11 openings and 11 finales delayed 40,
+47, 54, 60, 67, 74, 80, 87, 94, 100 and 107 seconds. The synthetic fixtures add
+partial-second song lengths, an extra zero-duration disabled-singer check, a
+changed or missing `C0SINGI2.EFF`, an existing `C0ABIVE.EFF`, and controllers that
+already carry a finale. The ending has not been verified in the engine.
