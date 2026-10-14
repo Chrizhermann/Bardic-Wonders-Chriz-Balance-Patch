@@ -1,9 +1,8 @@
 # Priest-spell copies and the Gallant integration — 14 October 2026
 
-This records the fixes for issues #2, #3 and #4. They are on the development
-branch and not yet released. The Darkbloom Spell Revisions exclusion in the
-README stays in force until they are released and checked in a Spell Revisions
-game.
+This records the fixes for issues #2, #3 and #4, released in v2.9c-balance.8.
+The Darkbloom Spell Revisions exclusion in the README stays in force until they
+are checked in a Spell Revisions game.
 
 ## What was wrong
 

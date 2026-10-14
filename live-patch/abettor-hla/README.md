@@ -10,15 +10,15 @@ This is a one-component WeiDU tail patch for an existing Bardic Wonders playthro
 > #5](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues/5)
 > and does not undo the other balance changes made by this patch.
 
-Version **1.2.0** (unreleased) ends every Symphony activation with one round of
-party Invisibility once that activation's song runs out, rounded up to the next
-whole second, also while a newer Symphony is playing. Earlier versions copied
-the Bard Song Mechanics Tweak's disabled-singer check, which fires every round
-while the singer is disabled and never when the song ends; 1.2.0 neither copies
-nor needs `C0SINGI2.EFF`. A playthrough with 1.1.0 can reinstall the tail as
-1.2.0. Playthroughs whose component 2004 added the Symphony hooks itself
-(`v2.9c-balance.5` to `.7`) are still refused because `C0ABIVI.SPL` and
-`C0ABIVS.EFF` already exist; there is no repair for them yet.
+Version **1.2.0** (released with v2.9c-balance.8) ends every Symphony activation
+with one round of party Invisibility once that activation's song runs out,
+rounded up to the next whole second, also while a newer Symphony is playing.
+Earlier versions copied the Bard Song Mechanics Tweak's disabled-singer check,
+which fires every round while the singer is disabled and never when the song
+ends; 1.2.0 neither copies nor needs `C0SINGI2.EFF`. A playthrough with 1.1.0
+can reinstall the tail as 1.2.0. Playthroughs whose component 2004 added the
+Symphony hooks itself (`v2.9c-balance.5` to `.7`) are still refused because
+`C0ABIVI.SPL` and `C0ABIVS.EFF` already exist; there is no repair for them yet.
 
 Version **1.1.0** supports the actual generated finite controller and restores a
 missing `LUC0ABET.2DA` Symphony availability row after resource validation. This
