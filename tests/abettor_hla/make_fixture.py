@@ -17,7 +17,7 @@ TAIL_ROOT = ROOT / "live-patch" / "abettor-hla"
 WEIDU = ROOT / "Setup-BardicWonders.exe"
 FIXTURE_SENTINEL = ".abettor-hla-disposable-fixture"
 FIXTURE_SENTINEL_CONTENT = "abettor-hla-disposable-fixture-v1\n"
-RESERVED_OUTPUTS = ("C0ABIVI.SPL", "C0ABIVS.EFF", "C0ABIVE.EFF")
+RESERVED_OUTPUTS = ("C0ABIVI.SPL", "C0ABIVS.EFF")
 
 
 def sha256(path: Path) -> str:
@@ -73,7 +73,6 @@ def build_fixture(source: Path, destination: Path) -> dict[str, object]:
         "C0ABETHL.SPL",
         "C0SINGIN.SPL",
         "C0SINGIN.EFF",
-        "C0SINGI2.EFF",
         *(name for name in ("LUC0ABET.2DA",) if (source_override / name).is_file()),
     )
 

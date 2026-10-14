@@ -213,31 +213,42 @@ def validate_installed(fixture: Path, payload_resref: str, marker_counts: tuple[
                 special=0,
             )
         ]
+        songs = [
+            effect.duration
+            for effect in ability.effects
+            if effect.matches(opcode=272, target=9, timing=10, resource=payload_resref)
+        ]
+        if len(songs) != 1:
+            raise AssertionError(f"controller header {index} lacks exactly one song pulse")
+        # The finale is delayed in whole seconds until the song's last tick.
         end_hooks = [
             effect
             for effect in ability.effects
             if effect.matches(
-                opcode=272,
+                opcode=326,
                 target=9,
                 power=0,
-                parameter1=6,
-                parameter2=3,
-                timing=10,
+                parameter1=0,
+                parameter2=0,
+                timing=4,
+                resist_dispel=0,
+                duration=-(-songs[0] // 15),
                 probability1=100,
                 probability2=0,
-                resource="C0ABIVE",
+                resource="C0ABIVI",
                 dice_count=0,
                 dice_size=0,
                 save_type=0,
                 save_bonus=0,
-                special=40,
+                special=0,
             )
-            and effect.duration > 0
         ]
         if len(start_hooks) != 1:
             raise AssertionError(f"controller header {index} lacks exactly one start hook")
-        if len(end_hooks) != 1:
+        if len(end_hooks) != 1 or len([e for e in ability.effects if e.resource == "C0ABIVI"]) != 1:
             raise AssertionError(f"controller header {index} lacks exactly one end hook")
+        if any(effect.resource == "C0ABIVE" for effect in ability.effects):
+            raise AssertionError(f"controller header {index} still uses the old end hook")
 
     invisibility = parse_spl(override / "C0ABIVI.SPL")
     invisibility_ability = invisibility.abilities[0]
@@ -358,7 +369,7 @@ def verify(fixture: Path) -> None:
             raise AssertionError(f"uninstall did not restore exact hash: {path.name}")
     if tlk_entries(fixture / "dialog.tlk")[: len(before_tlk_entries)] != before_tlk_entries:
         raise AssertionError("uninstall did not restore all pre-existing TLK entries")
-    for name in ("C0ABIVI.SPL", "C0ABIVS.EFF", "C0ABIVE.EFF"):
+    for name in ("C0ABIVI.SPL", "C0ABIVS.EFF"):
         if (override / name).exists():
             raise AssertionError(f"uninstall left a generated resource behind: {name}")
     if component_ids(fixture / "WeiDU.log") != before_components:

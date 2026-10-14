@@ -114,5 +114,8 @@ refresh effects and later-mod markers are preserved. Automated producer and
 copied-resource install/uninstall checks cover this installer change.
 
 The narrower opening/finale party invisibility issue #5 remains open; broad kit
-approval does not establish those exact engine events. Darkbloom's Spell Revisions
+approval does not establish those exact engine events. The released finale does
+not fire when the song runs out; the development branch replaces it with a
+delayed ending on every activation (see the README's Symphony ending section),
+which also still needs an in-engine check. Darkbloom's Spell Revisions
 exclusion and the other compatibility/deferred-design items above remain in force.

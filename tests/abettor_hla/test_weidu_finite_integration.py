@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import unittest
 
-from .ie_resources import parse_spl, read_eff_resource
+from .ie_resources import Ability, Effect, parse_spl, read_eff_resource
 from .test_patcher import effect_bytes
 
 
@@ -15,6 +15,49 @@ ROOT = Path(__file__).resolve().parents[2]
 WEIDU = ROOT / "Setup-BardicWonders.exe"
 FINITE_TPA = ROOT / "BardicWonders" / "lib" / "abettor_hla_finite.tpa"
 HLA_ACTIONS = ROOT / "BardicWonders" / "lib" / "hla_actions.tpa"
+
+
+def finale_delay(song_ticks: int) -> int:
+    """Delayed effects count whole seconds and a song lasts ticks (15 per
+    second); the finale waits for the song's last tick."""
+    return -(-song_ticks // 15)
+
+
+def song_ticks(ability: Ability, payload: str) -> int:
+    return next(
+        effect.duration
+        for effect in ability.effects
+        if effect.matches(opcode=272, timing=10, resource=payload)
+    )
+
+
+def is_finale(effect: Effect, song: int) -> bool:
+    return effect.matches(
+        opcode=326,
+        target=9,
+        power=0,
+        parameter1=0,
+        parameter2=0,
+        timing=4,
+        resist_dispel=0,
+        duration=finale_delay(song),
+        probability1=100,
+        probability2=0,
+        resource="C0ABIVI",
+        dice_count=0,
+        dice_size=0,
+        save_type=0,
+        save_bonus=0,
+        special=0,
+    )
+
+
+def opening_effect() -> bytes:
+    return effect_bytes(177, target=9, parameter2=2, timing=1, duration=0, resource="C0ABIVS")
+
+
+def finale_effect(delay: int) -> bytes:
+    return effect_bytes(326, target=9, timing=4, duration=delay, resource="C0ABIVI")
 
 
 def controller_bytes(
@@ -37,6 +80,7 @@ def controller_bytes(
     extra_end_duration: int | None = None,
     extra_end_resist_dispel: int = 0,
     extra_end_resource: str = "C0SINGI2",
+    extra_effects: tuple[bytes, ...] = (),
 ) -> bytes:
     ability_offset = 0x72
     global_effects = [
@@ -154,6 +198,7 @@ def controller_bytes(
                     special=40,
                 )
             )
+        effect_groups[-1].extend(extra_effects)
 
     effect_offset = ability_offset + len(effect_groups) * 0x28
     data = bytearray(effect_offset)
@@ -219,6 +264,8 @@ class WeiduFiniteIntegrationTests(unittest.TestCase):
         extra_end_duration: int | None = None,
         extra_end_resist_dispel: int = 0,
         extra_end_resource: str = "C0SINGI2",
+        extra_effects: tuple[bytes, ...] = (),
+        durations: tuple[int, ...] = (600, 700),
     ) -> None:
         override = root / "override"
         library = root / "testmod" / "lib"
@@ -256,6 +303,7 @@ class WeiduFiniteIntegrationTests(unittest.TestCase):
         if finite:
             (override / "C0ABETS2.SPL").write_bytes(
                 controller_bytes(
+                    durations,
                     payload_resource=payload_resref,
                     start_duration=start_duration,
                     start_power=start_power,
@@ -273,6 +321,7 @@ class WeiduFiniteIntegrationTests(unittest.TestCase):
                     extra_end_duration=extra_end_duration,
                     extra_end_resist_dispel=extra_end_resist_dispel,
                     extra_end_resource=extra_end_resource,
+                    extra_effects=extra_effects,
                 )
             )
         else:
@@ -317,39 +366,38 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
             check=False,
         )
 
-    def test_recognized_controller_gets_one_start_and_end_hook_per_header(self) -> None:
+    def test_recognized_controller_gets_one_opening_and_finale_per_header(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_fixture(root, finite=True)
+            original = parse_spl(root / "override" / "C0ABETS2.SPL")
+            end_check = (root / "override" / "C0SINGI2.EFF").read_bytes()
 
             result = self.install(root)
 
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             controller = parse_spl(root / "override" / "C0ABETS2.SPL")
-            for index, ability in enumerate(controller.abilities):
+            self.assertEqual(len(original.abilities), len(controller.abilities))
+            for index, (old, new) in enumerate(zip(original.abilities, controller.abilities)):
                 with self.subTest(header=index):
-                    self.assertEqual(
-                        1,
-                        sum(
-                            effect.matches(
-                                opcode=177,
-                                target=9,
-                                resource="C0ABIVS",
-                            )
-                            for effect in ability.effects
-                        ),
+                    openings = [effect for effect in new.effects if effect.resource == "C0ABIVS"]
+                    finales = [effect for effect in new.effects if effect.resource == "C0ABIVI"]
+                    self.assertEqual(1, len(openings))
+                    self.assertTrue(
+                        openings[0].matches(opcode=177, target=9, parameter2=2, timing=1, duration=0)
                     )
+                    self.assertEqual(1, len(finales))
+                    self.assertTrue(is_finale(finales[0], song_ticks(new, "ZZPAYLD")), finales[0])
+                    # Everything else in the header is kept as it was.
                     self.assertEqual(
-                        1,
-                        sum(
-                            effect.matches(
-                                opcode=272,
-                                target=9,
-                                resource="C0ABIVE",
-                            )
-                            for effect in ability.effects
-                        ),
+                        list(old.effects),
+                        [effect for effect in new.effects if effect.resource not in {"C0ABIVS", "C0ABIVI"}],
                     )
+            # 600 and 700 ticks are 40 and 46.7 seconds.
+            self.assertEqual([40, 47], [effect.duration for effect in controller.find_effects(resource="C0ABIVI")])
+            self.assertEqual((), controller.find_effects(resource="C0ABIVE"))
+            self.assertFalse((root / "override" / "C0ABIVE.EFF").exists())
+            self.assertEqual(end_check, (root / "override" / "C0SINGI2.EFF").read_bytes())
 
             invisibility = parse_spl(root / "override" / "C0ABIVI.SPL")
             payload = parse_spl(root / "override" / "ZZPAYLD.SPL")
@@ -374,22 +422,35 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
             self.assertEqual(
                 "C0ABIVI", read_eff_resource(root / "override" / "C0ABIVS.EFF")
             )
-            self.assertEqual(
-                "C0ABIVI", read_eff_resource(root / "override" / "C0ABIVE.EFF")
-            )
-            for donor_name, clone_name in (
-                ("C0SINGIN.EFF", "C0ABIVS.EFF"),
-                ("C0SINGI2.EFF", "C0ABIVE.EFF"),
-            ):
-                donor = bytearray((root / "override" / donor_name).read_bytes())
-                clone = bytearray((root / "override" / clone_name).read_bytes())
-                donor[0x30:0x38] = clone[0x30:0x38]
-                self.assertEqual(donor, clone)
+            donor = bytearray((root / "override" / "C0SINGIN.EFF").read_bytes())
+            clone = bytearray((root / "override" / "C0ABIVS.EFF").read_bytes())
+            donor[0x30:0x38] = clone[0x30:0x38]
+            self.assertEqual(donor, clone)
             table = (root / "override" / "LUC0ABET.2DA").read_text(encoding="ascii")
             self.assertEqual(1, table.count("AP_C0ABETHL"))
             self.assertEqual(
                 "ZZPAYLD", read_eff_resource(root / "override" / "ZZPAYLD.EFF")
             )
+
+    def test_finale_waits_for_the_last_tick_of_each_song(self) -> None:
+        # Fifteen ticks are one second; a partial second rounds up.
+        durations = (15, 16, 29, 30, 1000, 1600)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, finite=True, durations=durations)
+
+            result = self.install(root)
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            controller = parse_spl(root / "override" / "C0ABETS2.SPL")
+            delays = [
+                next(effect.duration for effect in ability.effects if effect.resource == "C0ABIVI")
+                for ability in controller.abilities
+            ]
+            self.assertEqual([1, 2, 2, 2, 67, 107], delays)
+            for ability, song in zip(controller.abilities, durations):
+                self.assertEqual(song, song_ticks(ability, "ZZPAYLD"))
+                self.assertGreaterEqual(15 * finale_delay(song), song)
 
     def test_toggle_or_unrecognized_song_keeps_symphony_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -497,15 +558,27 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
                         sum(effect.resource == "C0ABIVS" for effect in ability.effects),
                     )
 
-    def test_zero_duration_end_selector_duplicate_keeps_symphony_unavailable(self) -> None:
+    def test_extra_end_check_variant_is_kept_and_does_not_block_the_finale(self) -> None:
+        # The finale is not copied from the disabled-singer check, so a second,
+        # zero-duration copy of that check is just another effect to keep.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_fixture(root, finite=True, extra_end_duration=0)
 
             result = self.install(root)
 
-            self.assertIn(result.returncode, (0, 3), result.stdout + result.stderr)
-            self.assertFalse((root / "override" / "C0ABIVI.SPL").exists())
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            controller = parse_spl(root / "override" / "C0ABETS2.SPL")
+            for ability in controller.abilities:
+                finales = [effect for effect in ability.effects if effect.resource == "C0ABIVI"]
+                self.assertEqual(1, len(finales))
+                self.assertTrue(is_finale(finales[0], song_ticks(ability, "ZZPAYLD")))
+                self.assertEqual(
+                    1,
+                    sum(effect.matches(opcode=272, resource="C0SINGI2", duration=0) for effect in ability.effects),
+                )
+            table = (root / "override" / "LUC0ABET.2DA").read_text(encoding="ascii")
+            self.assertEqual(1, table.count("AP_C0ABETHL"))
 
     def test_malformed_preexisting_hook_references_keep_symphony_unavailable(self) -> None:
         cases = (
@@ -513,6 +586,7 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
                 "extra_start_probability": 50,
                 "extra_start_resource": "C0ABIVS",
             },
+            # The end hook of earlier releases.
             {
                 "extra_end_duration": 0,
                 "extra_end_resource": "C0ABIVE",
@@ -521,6 +595,9 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
                 "extra_start_probability": 50,
                 "extra_start_resource": "C0ABIVI",
             },
+            # A finale without an opening, and a controller that already has both.
+            {"extra_effects": (finale_effect(40),)},
+            {"extra_effects": (opening_effect(), finale_effect(40))},
         )
         for fixture_kwargs in cases:
             with self.subTest(fixture_kwargs=fixture_kwargs), tempfile.TemporaryDirectory() as directory:
@@ -534,25 +611,31 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
                 table = (root / "override" / "LUC0ABET.2DA").read_text(encoding="ascii")
                 self.assertNotIn("AP_C0ABETHL", table)
 
-    def test_drifted_end_hook_condition_keeps_symphony_unavailable(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.make_fixture(root, finite=True)
-            end_hook = root / "override" / "C0SINGI2.EFF"
-            data = bytearray(end_hook.read_bytes())
-            struct.pack_into("<i", data, 0x1C, -2146422738)
-            end_hook.write_bytes(data)
+    def test_finale_does_not_depend_on_the_disabled_singer_eff(self) -> None:
+        for case in ("changed", "missing"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_fixture(root, finite=True)
+                end_check = root / "override" / "C0SINGI2.EFF"
+                if case == "changed":
+                    data = bytearray(end_check.read_bytes())
+                    struct.pack_into("<i", data, 0x1C, -2146422738)
+                    end_check.write_bytes(data)
+                    before = end_check.read_bytes()
+                else:
+                    end_check.unlink()
 
-            result = self.install(root)
+                result = self.install(root)
 
-            self.assertIn(result.returncode, (0, 3), result.stdout + result.stderr)
-            self.assertIn(
-                "skipping Symphony of the Dark Children",
-                result.stdout + result.stderr,
-            )
-            self.assertFalse((root / "override" / "C0ABIVI.SPL").exists())
-            table = (root / "override" / "LUC0ABET.2DA").read_text(encoding="ascii")
-            self.assertNotIn("AP_C0ABETHL", table)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                controller = parse_spl(root / "override" / "C0ABETS2.SPL")
+                self.assertEqual(2, len(controller.find_effects(opcode=326, timing=4, resource="C0ABIVI")))
+                if case == "changed":
+                    self.assertEqual(before, end_check.read_bytes())
+                else:
+                    self.assertFalse(end_check.exists())
+                table = (root / "override" / "LUC0ABET.2DA").read_text(encoding="ascii")
+                self.assertEqual(1, table.count("AP_C0ABETHL"))
 
     def test_drifted_hook_timing_keeps_symphony_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -726,7 +809,7 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
             self.assertFalse((root / "override" / "C0ABIVI.SPL").exists())
 
     def test_reserved_output_collision_keeps_symphony_unavailable(self) -> None:
-        for name in ("C0ABIVI.SPL", "C0ABIVS.EFF", "C0ABIVE.EFF"):
+        for name in ("C0ABIVI.SPL", "C0ABIVS.EFF"):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 self.make_fixture(root, finite=True)
@@ -739,7 +822,23 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
                 self.assertIn(result.returncode, (0, 3), result.stdout + result.stderr)
                 self.assertEqual(before, collision.read_bytes())
                 table = (root / "override" / "LUC0ABET.2DA").read_text(encoding="ascii")
-            self.assertNotIn("AP_C0ABETHL", table)
+                self.assertNotIn("AP_C0ABETHL", table)
+
+    def test_existing_c0abive_eff_is_left_alone(self) -> None:
+        # Earlier releases created C0ABIVE.EFF; this one neither needs nor writes it.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, finite=True)
+            other = root / "override" / "C0ABIVE.EFF"
+            other.write_bytes(b"unrelated resource")
+
+            result = self.install(root)
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(b"unrelated resource", other.read_bytes())
+            controller = parse_spl(root / "override" / "C0ABETS2.SPL")
+            self.assertEqual((), controller.find_effects(resource="C0ABIVE"))
+            self.assertEqual(2, len(controller.find_effects(resource="C0ABIVI")))
 
     def test_unusable_payload_header_keeps_symphony_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
