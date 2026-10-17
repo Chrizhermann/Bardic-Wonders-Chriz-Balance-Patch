@@ -1,0 +1,26 @@
+// Adapter for chriz-bg-rebalance's API 1. The provider owns the engine hook.
+// This component changes base-table registrations and descriptions only.
+ACTION_IF (NOT FILE_EXISTS_IN_GAME ~CBRSPVER.2DA~) BEGIN
+  FAIL ~Bard progression: the chriz-bg-rebalance core is missing.~
+END
+ACTION_IF (NOT FILE_EXISTS ~override/CBRSPAPI.TPA~) BEGIN
+  FAIL ~Bard progression: the provider API helper is missing. Reinstall the core.~
+END
+
+INCLUDE ~override/CBRSPAPI.TPA~
+LAF cbr_sp_validate_provider END
+
+LAF cbr_sp_register_bard STR_VAR kit_symbol = ~C0DANCE~ slot_table = ~CBRBG6~ description_section = ~Disadvantages~ progression_text = ~Uses the original Baldur's Gate bard progression, limited to 6th-level spells. The kit's spell-slot penalty still applies.~ END
+ACTION_FOR_EACH bw_symbol IN C0_KAPELLMEISTER C0BDD BEGIN
+  LAF cbr_sp_register_bard STR_VAR kit_symbol = EVAL ~%bw_symbol%~ slot_table = ~CBRIWD8~ progression_text = ~Uses the Icewind Dale bard progression through 8th-level spells: 7th-level spells unlock at bard level 21 and 8th-level spells at bard level 29. The kit's bonus spell slots still apply.~ END
+END
+ACTION_FOR_EACH bw_symbol IN C0TRB C0_DEATHSINGER C0_STRATEGIST C0SDRUM C0ABETT BEGIN
+  LAF cbr_sp_register_bard STR_VAR kit_symbol = EVAL ~%bw_symbol%~ slot_table = ~CBRIWD7~ progression_text = ~Uses the Icewind Dale bard progression, limited to 7th-level spells; 7th-level spells unlock at bard level 21.~ END
+END
+
+// Core component 421 owns native-kit registrations. Refresh descriptions that
+// Bardic Wonders may have replaced after that component was installed.
+ACTION_FOR_EACH bw_symbol IN BLADE SKALD BEGIN
+  LAF cbr_sp_register_bard INT_VAR register_table = 0 STR_VAR kit_symbol = EVAL ~%bw_symbol%~ slot_table = ~CBRBG6~ description_section = ~Disadvantages~ progression_text = ~Uses the original Baldur's Gate bard progression, limited to 6th-level spells. Existing kit penalties still apply.~ END
+END
+LAF cbr_sp_register_bard INT_VAR register_table = 0 STR_VAR kit_symbol = ~JESTER~ slot_table = ~CBRIWD7~ progression_text = ~Uses the Icewind Dale bard progression, limited to 7th-level spells; 7th-level spells unlock at bard level 21.~ END
