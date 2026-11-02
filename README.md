@@ -1,3 +1,9 @@
+> [!NOTE]
+> **This Chriz edition is frozen: it gets no further balance changes.**
+> It stays in Chriz Easy BG until our own replacement mod is ready.
+> Please report problems with this edition here, in this repository's
+> [issues](https://github.com/Chrizhermann/Bardic-Wonders-Chriz-Balance-Patch/issues), not to the original author, Artemius_I. Credit for Bardic Wonders stays with the original author (see below).
+
 # Bardic Wonders — Balance Patch
 
 A personal balance-patch fork of [Bardic Wonders](https://github.com/TheArtisanBG/Bardic-Wonders) by **Artemius_I** (also known as **The Artisan** / **AionZ**), a fantastic mod that overhauls and expands the Bard class for BG:EE, BG2:EE, EET, and IWD:EE. All kit concepts, spell design, items, and creative direction are the original author's work; this fork adjusts balance and corrects related spell effects while keeping the spirit of each ability intact.
