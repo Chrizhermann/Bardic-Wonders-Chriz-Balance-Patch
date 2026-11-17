@@ -194,4 +194,11 @@ SAY UNIDENTIFIED_DESC ~This song is a powerful aid to the Kapellmeister and to a
 
 This ability replaces the current Bard Song.~
 
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSPA~ RET song_projectile = projectile END
+ACTION_FOR_EACH song IN C0KM#SO C0KM#SOH BEGIN
+  COPY_EXISTING ~%song%.SPL~ ~override~
+    LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+END
+
 INCLUDE ~%MOD_FOLDER%/lib/kapellmeister_balance.tpa~

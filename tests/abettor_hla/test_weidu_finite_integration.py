@@ -340,6 +340,7 @@ END
 LANGUAGE ~English~ ~english~
 BEGIN ~Abettor finite integration test~ DESIGNATED 0
 OUTER_SET c0bardso = 559
+OUTER_SET song_party_projectile = 158
 INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
 """,
             encoding="ascii",
@@ -751,7 +752,7 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
             self.assertIn(result.returncode, (0, 3), result.stdout + result.stderr)
             self.assertFalse((root / "override" / "C0ABIVI.SPL").exists())
 
-    def test_nonparty_payload_projectile_keeps_symphony_unavailable(self) -> None:
+    def test_nonparty_payload_projectile_is_replaced_by_the_party_projectile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_fixture(root, finite=True)
@@ -763,8 +764,9 @@ INCLUDE ~testmod/lib/abettor_hla_finite.tpa~
 
             result = self.install(root)
 
-            self.assertIn(result.returncode, (0, 3), result.stdout + result.stderr)
-            self.assertFalse((root / "override" / "C0ABIVI.SPL").exists())
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(158, parse_spl(payload).abilities[0].projectile)
+            self.assertEqual(158, parse_spl(root / "override" / "C0ABIVI.SPL").abilities[0].projectile)
 
     def test_hook_template_power_drift_keeps_symphony_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

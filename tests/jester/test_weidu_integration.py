@@ -54,7 +54,8 @@ def make_fixture(root: Path) -> None:
     override.mkdir()
     library.mkdir(parents=True)
     shutil.copytree(MOD / "Jester", root / "BardicWonders" / "Jester")
-    for name in ("jester.tpa", "kit_strref.tpa"):
+    shutil.copytree(MOD / "bardsong/projectiles", root / "BardicWonders/bardsong/projectiles")
+    for name in ("jester.tpa", "kit_strref.tpa", "song_projectile.tpa"):
         shutil.copy2(MOD / "lib" / name, library / name)
     (override / "KITLIST.2DA").write_text(
         "2DA V1.0\n*\n    ROWNAME LOWER MIXED HELP\n0   JESTER  0     0     0\n",
@@ -73,6 +74,9 @@ def make_fixture(root: Path) -> None:
     shutil.copy2(MOD / "Jester" / "spells" / "SPCL751A.SPL", override / "SPCL751A.SPL")
     (override / "CLABBA03.2DA").write_bytes(b"Original CLAB table\r\n")
     (override / "UNRELATED.TXT").write_bytes(b"untouched fixture resource\x00\xff")
+    (override / "PROJECTL.IDS").write_text("IDS V1.0\n159 INAREANP\n")
+    (override / "MISSILE.IDS").write_text("IDS V1.0\n0 NONE\n")
+    (root / "chitin.key").write_bytes(b"KEY V1  " + struct.pack("<IIII", 0, 0, 24, 24))
     (root / "dialog.tlk").write_bytes(original_tlk())
     (root / "Setup-JesterTest.tp2").write_text(
         "BACKUP ~BardicWonders/backup~\nAUTHOR ~test~\n"
@@ -92,7 +96,7 @@ def run_weidu(root: Path, operation: str = "install") -> subprocess.CompletedPro
     }[operation]
     return subprocess.run(
         [
-            str(WEIDU), "--no-auto-tp2", "--noautoupdate", "--nogame",
+            str(WEIDU), "--no-auto-tp2", "--noautoupdate", "--game", str(root),
             "--search", "override", "--tlkin", "dialog.tlk", "--tlkout", "dialog.tlk",
             "--no-exit-pause", "--language", "0", "Setup-JesterTest.tp2", *operation_args,
         ],
@@ -168,7 +172,9 @@ class JesterWeiduIntegrationTests(unittest.TestCase):
             actual = self.spell(name)
             self.assertEqual(len(donor.abilities), len(actual.abilities))
             for old_ability, new_ability in zip(donor.abilities, actual.abilities):
-                self.assertEqual(replace(old_ability, effects=()), replace(new_ability, effects=()))
+                expected_projectile = 161 if name != "C0JES01.SPL" else old_ability.projectile
+                self.assertEqual(replace(old_ability, effects=(), projectile=expected_projectile),
+                                 replace(new_ability, effects=()))
                 self.assertEqual(len(old_ability.effects), len(new_ability.effects))
                 for old, new in zip(old_ability.effects, new_ability.effects):
                     with self.subTest(spell=name, level=old_ability.required_level, opcode=old.opcode):

@@ -1,4 +1,12 @@
 ADD_PROJECTILE ~%MOD_FOLDER%/bardsong/c0bardso.PRO~ ~C0 Bardsong~
+COPY ~%MOD_FOLDER%/bardsong/c0bardso.PRO~ ~override~
+
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSPA~ RET song_party_projectile = projectile END
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSNP~ RET song_enemy_projectile = projectile END
+ACTION_IF GAME_IS ~iwdee~ BEGIN
+  LAF c0bw_song_projectile STR_VAR resref = ~C0BWSIW~ RET song_enemy_projectile = projectile END
+END
 
 COPY_EXISTING ~KITLIST.2DA~ ~override~
   READ_2DA_ENTRIES_NOW ~fig_kitlist~ 10
@@ -17,11 +25,6 @@ COPY_EXISTING ~KITLIST.2DA~ ~override~
 END
 END
 END
-
-ACTION_FOR_EACH invisible_area IN INAREANP INAREA INAREASM BIGNAREA INAREAPA BEGIN
-    COPY_EXISTING ~%invisible_area%.pro~ ~OVERRIDE~
-     WRITE_BYTE 0x21a 0
-  END
 
 COPY ~%MOD_FOLDER%/bardsong/c0bardx.spl~ OVERRIDE
 COPY ~%MOD_FOLDER%/bardsong/c0bardsx.spl~ OVERRIDE
@@ -116,6 +119,16 @@ COPY_EXISTING_REGEXP GLOB ~.*\.spl~ ~override~
     BUT_ONLY
 
     COPY_EXISTING ~%bardsong_name%.spl~ ~override/%song_name%.spl~
+    // Stock song variants are the responsibility of this component. The kit
+    // components already assign their own pulse projectiles.
+    PATCH_IF (~%bardsong_name%~ STRING_EQUAL_CASE ~FJBARDA~)
+          OR (~%bardsong_name%~ STRING_EQUAL_CASE ~FJBLADEB~)
+          OR (~%bardsong_name%~ STRING_EQUAL_CASE ~SPCL920A~)
+          OR ((GAME_IS ~iwdee~) AND (~%bardsong_name%~ STRING_EQUAL_CASE ~FJBARDB~)) BEGIN
+      LPF ALTER_SPELL_HEADER INT_VAR projectile = song_party_projectile END
+    END ELSE PATCH_IF (~%bardsong_name%~ STRING_EQUAL_CASE ~SPCL751A~) BEGIN
+      LPF ALTER_SPELL_HEADER INT_VAR projectile = song_enemy_projectile END
+    END
     LPF ALTER_EFFECT INT_VAR silent = 1 STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~ END
     COPY ~%MOD_FOLDER%/bardsong/c0bardso.spl~ ~OVERRIDE/%bardsong_name%.SPL~
     LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bardso END

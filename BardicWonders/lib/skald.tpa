@@ -173,3 +173,11 @@ COPY_EXISTING ~C0EKCC1A.SPL~ OVERRIDE
 
 COPY_EXISTING ~C0EKCC1B.SPL~ OVERRIDE
   LPF CLONE_EFFECT INT_VAR match_opcode = 189 opcode = 177 parameter2 = 9 parameter1 = IDS_OF_SYMBOL (~KIT~ ~SKALD~) STR_VAR resource = C0EKCC3 END
+
+
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSPA~ RET song_projectile = projectile END
+ACTION_FOR_EACH song IN C0SKD02A SPCL542A BEGIN
+  COPY_EXISTING ~%song%.SPL~ ~override~
+    LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+END

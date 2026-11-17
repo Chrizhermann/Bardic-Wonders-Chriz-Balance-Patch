@@ -894,7 +894,6 @@ BEGIN
             READ_SHORT (ability_offset + 0x20) first_effect
             READ_SHORT (ability_offset + 0x22) ability_charges
             READ_SHORT (ability_offset + 0x24) ability_depletion
-            READ_SHORT (ability_offset + 0x26) party_projectile
             SET first_effect_offset = effect_offset + first_effect * 0x30
             PATCH_IF
               (ability_type = 1)
@@ -914,11 +913,10 @@ BEGIN
               AND (first_effect = 0)
               AND (ability_charges = 1)
               AND (ability_depletion = 1)
-              AND (party_projectile = 158)
               AND ((first_effect_offset + effect_count * 0x30) <= BUFFER_LENGTH)
             BEGIN
               INNER_ACTION BEGIN
-                OUTER_SET c0_abettor_party_projectile = party_projectile
+                OUTER_SET c0_abettor_party_projectile = song_party_projectile
               END
             END
           END
@@ -992,12 +990,15 @@ BEGIN
       (c0_abettor_pointer_valid = 1)
       AND (c0_abettor_payload_eff_valid = 1)
       AND (FILE_EXISTS_IN_GAME ~%c0_abettor_payload%.SPL~)
-    AND (c0_abettor_party_projectile = 158)
+    AND (c0_abettor_party_projectile > 1)
     AND (c0_abettor_reserved_outputs_clear = 1)
     AND (c0_abettor_controller_valid = 1)
     AND (c0_abettor_spell_template_valid = 1)
     AND (c0_abettor_start_template_valid = 1)
   BEGIN
+    COPY_EXISTING ~%c0_abettor_payload%.SPL~ ~override~
+      LPF ALTER_SPELL_HEADER INT_VAR projectile = c0_abettor_party_projectile END
+
     COPY_EXISTING ~C0SINGIN.SPL~ ~override/C0ABIVI.SPL~
       LPF DELETE_EFFECT
         INT_VAR

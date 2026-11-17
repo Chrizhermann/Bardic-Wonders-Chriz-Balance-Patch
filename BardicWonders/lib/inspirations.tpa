@@ -1,6 +1,7 @@
 COPY ~%MOD_FOLDER%/Inspirations~ ~OVERRIDE~
 
 ADD_PROJECTILE ~%MOD_FOLDER%/inspirations/c0bdipr.PRO~ ~C0 Inspiration~
+COPY ~%MOD_FOLDER%/inspirations/c0bdipr.PRO~ ~override~
 
 ACTION_IF FILE_EXISTS_IN_GAME ~CLABBA01.2DA~ BEGIN
 COPY_EXISTING ~CLABBA01.2DA~ OVERRIDE

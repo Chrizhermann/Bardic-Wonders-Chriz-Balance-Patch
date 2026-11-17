@@ -1,0 +1,9 @@
+// Each profile has a fixed radius and target filter. Only song spells use these projectiles.
+DEFINE_ACTION_FUNCTION c0bw_song_projectile
+  STR_VAR resref = ""
+  RET projectile
+BEGIN
+  ADD_PROJECTILE ~%MOD_FOLDER%/bardsong/projectiles/%resref%.PRO~
+  COPY ~%MOD_FOLDER%/bardsong/projectiles/%resref%.PRO~ ~override~
+  OUTER_SET projectile = EVAL "%resref%"
+END

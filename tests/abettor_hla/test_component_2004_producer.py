@@ -48,19 +48,20 @@ def effect_records(path: Path) -> tuple[tuple[bytes, ...], tuple[tuple[bytes, ..
 
 
 class Component2004ProducerTests(unittest.TestCase):
-    def make_fixture(self, root: Path, *, existing_projectile: int, reserve_payload_name: bool = False) -> None:
+    def make_fixture(self, root: Path, *, existing_projectile: int, reserve_payload_name: bool = False, snapshot: bool = True) -> None:
         override = root / "override"
         override.mkdir()
         library = root / "testmod" / "lib"
         library.mkdir(parents=True)
         shutil.copytree(MOD / "bardsong", root / "testmod" / "bardsong")
-        for name in ("bardsongtweaks.tpa", "functions.tph", "hla_actions.tpa"):
+        for name in ("bardsongtweaks.tpa", "functions.tph", "hla_actions.tpa", "song_projectile.tpa"):
             shutil.copy2(MOD / "lib" / name, library / name)
         shutil.copy2(MOD / "lib" / "abettor_hla_finite.tpa", library / "finite_actual.tpa")
         # Capture what the unchanged producer actually emits immediately before
         # its existing finite-integration INCLUDE. No producer code is replaced.
         (library / "abettor_hla_finite.tpa").write_text(
-            "COPY ~override~ ~producer-snapshot~\nINCLUDE ~testmod/lib/finite_actual.tpa~\n",
+            ("COPY ~override~ ~producer-snapshot~\n" if snapshot else "")
+            + "INCLUDE ~testmod/lib/finite_actual.tpa~\n",
             encoding="ascii",
         )
         for name in ("c0abets2.spl", "c0abethl.spl"):
@@ -77,8 +78,11 @@ class Component2004ProducerTests(unittest.TestCase):
             "2DA V1.0\n0\n STRREF\nSTRREF_FEEDBACK_BATTLESONGBEGIN 0\nSTRREF_FEEDBACK_BATTLESONGEND 0\n",
             encoding="ascii",
         )
+        shared_projectile = bytearray((MOD / "bardsong/c0bardso.PRO").read_bytes())
+        shared_projectile[0x0C] &= ~0x40
+        shared_projectile[0x21A] = 0x4F
         for name in ("INAREANP", "INAREA", "INAREASM", "BIGNAREA", "INAREAPA"):
-            shutil.copy2(MOD / "bardsong" / "c0bardso.PRO", override / f"{name}.PRO")
+            (override / f"{name}.PRO").write_bytes(shared_projectile)
         shutil.copy2(MOD / "items" / "c0bwam1.itm", override / "FIXTURE.ITM")
         # A genuine empty compiled script exercises the component's final scan.
         (override / "FIXTURE.BCS").write_text("SC\nSC\n", encoding="ascii")
@@ -102,6 +106,41 @@ class Component2004ProducerTests(unittest.TestCase):
             encoding="ascii",
         )
 
+    def test_a_preexisting_controller_keeps_its_id_and_is_restored_on_uninstall(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, existing_projectile=558, snapshot=False)
+            override = root / "override"
+            (override / "GET_UNIQUE_FILENAME_SPL.IDS").write_text("IDS V1.0\n", encoding="ascii")
+            ids = resource(override, "PROJECTL.IDS")
+            with ids.open("a", encoding="ascii") as out:
+                out.write("518 C0BARDSO\n")
+            old = bytearray((MOD / "bardsong/c0bardso.PRO").read_bytes())
+            old[0x0C] &= ~0x40
+            old[0x2C] |= 0x40
+            old[0x206] ^= 0x3F
+            (override / "C0BARDSO.PRO").write_bytes(old)
+            before = {p.name.upper(): p.read_bytes() for p in override.iterdir()}
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual((MOD / "bardsong/c0bardso.PRO").read_bytes(),
+                             resource(override, "C0BARDSO.PRO").read_bytes())
+            self.assertEqual(519, parse_spl(resource(override, "C0ABETS2.SPL")).abilities[0].projectile)
+            result = subprocess.run(
+                [str(WEIDU), "testmod/setup-test.tp2", "--no-auto-tp2", "--game", str(root),
+                 "--no-exit-pause", "--language", "0", "--force-uninstall-list", "2004"],
+                cwd=root, text=True, capture_output=True, check=False, timeout=60,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            after = {p.name.upper(): p.read_bytes() for p in override.iterdir()}
+            self.assertEqual(set(before), set(after), result.stdout + result.stderr)
+            # WeiDU keeps the reserved payload name across uninstall.
+            allocator = "GET_UNIQUE_FILENAME_SPL.IDS"
+            self.assertIn(b"C0ABETS2", after.pop(allocator))
+            del before[allocator]
+            for name, data in before.items():
+                self.assertEqual(data, after[name], name)
+
     def install(self, root: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(WEIDU), "testmod/setup-test.tp2", "--no-auto-tp2", "--game", str(root), "--no-exit-pause",
@@ -124,6 +163,13 @@ class Component2004ProducerTests(unittest.TestCase):
                 payload = next(effect.resource for effect in original.abilities[0].effects if effect.opcode == 177 and effect.timing == 10)
                 payloads.append(payload)
                 projectile_ids.append(original.abilities[0].projectile)
+                for name in ("C0BARDSO", "C0BWSPA", "C0BWSNP"):
+                    projectile = resource(before, f"{name}.PRO").read_bytes()
+                    self.assertTrue(projectile[0x0C] & 0x40, name)
+                for name in ("INAREA", "INAREANP", "INAREAPA", "INAREASM", "BIGNAREA"):
+                    projectile = resource(root / "override", f"{name}.PRO").read_bytes()
+                    self.assertFalse(projectile[0x0C] & 0x40, name)
+                    self.assertEqual(0x4F, projectile[0x21A], name)
                 self.assertFalse((before / "C0ABETS2.EFF").exists())
                 self.assertEqual(payload, read_eff_resource(resource(before, f"{payload}.EFF")))
                 self.assertEqual(11, len(original.abilities))
@@ -169,7 +215,14 @@ class Component2004ProducerTests(unittest.TestCase):
                 )
                 self.assertEqual((), patched.find_effects(resource="C0ABIVE"))
                 self.assertFalse((after / "C0ABIVE.EFF").exists())
-                self.assertEqual(resource(before, f"{payload}.SPL").read_bytes(), resource(after, f"{payload}.SPL").read_bytes())
+                party_projectile = next(
+                    int(line.split()[0]) + 1 for line in resource(after, "PROJECTL.IDS").read_text().splitlines()
+                    if line.split() and line.split()[-1].upper() == "C0BWSPA"
+                )
+                expected_payload = bytearray(resource(before, f"{payload}.SPL").read_bytes())
+                payload_header = struct.unpack_from("<I", expected_payload, 0x64)[0]
+                struct.pack_into("<H", expected_payload, payload_header + 0x26, party_projectile)
+                self.assertEqual(expected_payload, resource(after, f"{payload}.SPL").read_bytes())
                 self.assertEqual(resource(before, "C0BARDSX.SPL").read_bytes(), resource(after, "C0BARDSX.SPL").read_bytes())
                 cooldown = parse_spl(resource(after, "C0BARDSX.SPL"))
                 self.assertEqual(1, len(cooldown.find_effects(opcode=144, target=9, parameter2=10, timing=10, duration=1000)))
@@ -177,7 +230,7 @@ class Component2004ProducerTests(unittest.TestCase):
                 self.assertFalse((after / "C0ABETS2.EFF").exists())
                 self.assertEqual(1, resource(after, "LUC0ABET.2DA").read_text().count("AP_C0ABETHL"))
                 invisibility = parse_spl(resource(after, "C0ABIVI.SPL"))
-                self.assertEqual(158, invisibility.abilities[0].projectile)
+                self.assertEqual(party_projectile, invisibility.abilities[0].projectile)
                 self.assertEqual(5, invisibility.abilities[0].target)
                 self.assertEqual(1, len(invisibility.effects))
                 self.assertTrue(invisibility.effects[0].matches(opcode=20, target=2, parameter2=0, timing=0, duration=6))
