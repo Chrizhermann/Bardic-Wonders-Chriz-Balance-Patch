@@ -62,9 +62,15 @@ class KapellmeisterBalanceTests(unittest.TestCase):
         self.assertTrue(actions.rstrip().endswith(
             "INCLUDE ~%MOD_FOLDER%/lib/kapellmeister_balance.tpa~"
         ))
-        transform = (MOD / "lib" / "bardsongtweaks.tpa").read_text(encoding="utf-8")
-        transform = transform[transform.index("COPY_EXISTING_REGEXP GLOB"):
-                              transform.index("INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~")]
+        shutil.copy2(MOD / "lib/bardsong_registration.tpa", fixture / "lib")
+        self.sources_before = file_snapshot(fixture)
+        transform = (
+            "INCLUDE ~BardicWonders/lib/bardsong_registration.tpa~\n"
+            'ACTION_FOR_EACH song IN C0KM#SO C0KM#SOH BEGIN\n'
+            '  LAF c0bw_wrap_song INT_VAR payload_projectile = 157 '
+            'STR_VAR bardsong_name = EVAL ~%song%~ END\n'
+            'END\n'
+        )
         (self.game / "test.tp2").write_text(
             "BACKUP ~backup~\nAUTHOR ~test~\n"
             "ALWAYS\nOUTER_SPRINT MOD_FOLDER ~BardicWonders~\n"

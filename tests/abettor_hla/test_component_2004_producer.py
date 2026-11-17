@@ -14,7 +14,7 @@ import unittest
 
 from .ie_resources import parse_spl, read_eff_resource
 from .test_tail_patch_integration import tlk_string, tlk_with_original_description
-from .test_weidu_finite_integration import HLA_TABLE, is_finale, song_ticks
+from .finite_fixtures import HLA_TABLE, is_finale, song_ticks
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,7 +54,8 @@ class Component2004ProducerTests(unittest.TestCase):
         library = root / "testmod" / "lib"
         library.mkdir(parents=True)
         shutil.copytree(MOD / "bardsong", root / "testmod" / "bardsong")
-        for name in ("bardsongtweaks.tpa", "functions.tph", "hla_actions.tpa", "song_projectile.tpa"):
+        for name in ("bardsongtweaks.tpa", "functions.tph", "hla_actions.tpa", "song_projectile.tpa",
+                     "bardsong_registration.tpa", "bardsong_description.tpa"):
             shutil.copy2(MOD / "lib" / name, library / name)
         shutil.copy2(MOD / "lib" / "abettor_hla_finite.tpa", library / "finite_actual.tpa")
         # Capture what the unchanged producer actually emits immediately before
@@ -141,10 +142,99 @@ class Component2004ProducerTests(unittest.TestCase):
             for name, data in before.items():
                 self.assertEqual(data, after[name], name)
 
-    def install(self, root: Path) -> subprocess.CompletedProcess[str]:
+    def test_edited_stock_and_symphony_inputs_are_rewritten(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, existing_projectile=1720, snapshot=False)
+            override = root / "override"
+            old_song = bytearray((MOD / "abettor/c0abets2.spl").read_bytes())
+            ability = struct.unpack_from("<I", old_song, 0x64)[0]
+            effect = struct.unpack_from("<I", old_song, 0x6A)[0]
+            old_song[0x1C] = 4
+            old_song[ability + 4:ability + 12] = b"EDITICON"
+            struct.pack_into("<H", old_song, ability + 0x0E, 73)
+            struct.pack_into("<H", old_song, ability + 0x26, 1)
+            struct.pack_into("<H", old_song, effect, 126)
+            # Add a valid second ability and a global effect. Legacy layouts
+            # and counts must not veto rebuilding the owned controller.
+            count = struct.unpack_from("<H", old_song, 0x68)[0]
+            added_header = old_song[ability:ability + 40]
+            old_song[effect:effect] = added_header
+            struct.pack_into("<H", old_song, 0x68, count + 1)
+            struct.pack_into("<I", old_song, 0x6A, effect + 40)
+            global_first = (len(old_song) - (effect + 40)) // 48
+            struct.pack_into("<HH", old_song, 0x6E, global_first, 1)
+            old_song.extend(struct.pack("<H", 142) + bytes(46))
+            (override / "SPCL542A.SPL").write_bytes(old_song)
+            resource(override, "C0ABETS2.SPL").write_bytes(old_song)
+            (override / "C0ABIVI.SPL").write_bytes(old_song)
+            (override / "CLASTEXT.2DA").write_text(
+                "2DA V1.0\n0\nCLASS MASK NAME DESC\nBARD 5 0 0 0\n"
+            )
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertNotIn("skipping Symphony", result.stdout)
+            ids = resource(override, "PROJECTL.IDS").read_text().splitlines()
+            party = next(int(l.split()[0]) + 1 for l in ids if l.split()[-1:] == ["C0BWSPA"])
+            controller = next(int(l.split()[0]) + 1 for l in ids if
+                              [x.upper() for x in l.split()[-1:]] == ["C0BARDSO"])
+            for spell in ("SPCL542A", "C0ABETS2"):
+                song = parse_spl(resource(override, spell + ".SPL"))
+                self.assertEqual({controller}, {ability.projectile for ability in song.abilities})
+                payload = next(e.resource for e in song.abilities[0].effects if e.opcode == 272)
+                payload_path = resource(override, payload + ".SPL")
+                abilities = parse_spl(payload_path).abilities
+                self.assertEqual(count + 1, len(abilities))
+                self.assertEqual({party}, {a.projectile for a in abilities})
+                self.assertEqual(142, struct.unpack_from("<H", effect_records(payload_path)[0][0])[0])
+            invisibility = parse_spl(resource(override, "C0ABIVI.SPL"))
+            self.assertEqual(party, invisibility.abilities[0].projectile)
+            self.assertEqual(50, invisibility.abilities[0].range)
+            table = resource(override, "CLASTEXT.2DA").read_text().splitlines()
+            description = int(next(l for l in table if l.startswith("BARD")).split()[4])
+            self.assertIn("Class features", tlk_string(root / "dialog.tlk", description))
+            self.assertIn("six rounds", tlk_string(root / "dialog.tlk", description))
+            self.assertIn("cannot be cast while wearing armor", tlk_string(root / "dialog.tlk", description))
+
+    def test_iwd_stock_profiles_are_written_without_kit_components(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            # WeiDU selects the IWD:EE branch via HOWPARTY.2DA in chitin.key.
+            howparty = struct.pack("<8sHI", b"HOWPARTY", 0x3F4, 0)
+            (root / "chitin.key").write_bytes(b"KEY V1  " + struct.pack("<IIII", 0, 1, 24, 24) + howparty)
+            language = root / "lang/en_US"
+            language.mkdir(parents=True)
+            (root / "dialog.tlk").rename(language / "dialog.tlk")
+            override = root / "override"
+            profiles = {
+                "SPCL115": "C0BWSIA", "SPCL116": "C0BWSIA", "SPCL117": "C0BWSIA",
+                "SPCL118": "C0BWSIW", "SPCL119": "C0BWSIA", "SPCL120": "C0BWSIA",
+                "SPCL542A": "C0BWSIA", "SPCL751A": "C0BWSIW", "SPCL920A": "C0BWSPA",
+            }
+            for spell in profiles:
+                shutil.copy2(MOD / "abettor/c0abets2.spl", override / f"{spell}.SPL")
+            stock = {spell: effect_records(override / f"{spell}.SPL") for spell in profiles}
+            result = self.install(root, "--use-lang", "en_US")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            ids = {}
+            for line in resource(override, "PROJECTL.IDS").read_text().splitlines():
+                columns = line.split()
+                if len(columns) == 2 and columns[0].isdigit():
+                    ids[columns[1].upper()] = int(columns[0]) + 1
+            for spell, name in profiles.items():
+                path = resource(override, spell + ".SPL")
+                self.assertEqual(stock[spell], effect_records(path))
+                self.assertEqual({ids[name]}, {a.projectile for a in parse_spl(path).abilities})
+            for name, radius in (("C0BWSIA", 512), ("C0BWSIW", 426), ("C0BWSPA", 256)):
+                data = resource(override, name + ".PRO").read_bytes()
+                self.assertTrue(data[0x0C] & 0x40, name)
+                self.assertEqual(radius, struct.unpack_from("<H", data, 0x204)[0], name)
+
+    def install(self, root: Path, *game_args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(WEIDU), "testmod/setup-test.tp2", "--no-auto-tp2", "--game", str(root), "--no-exit-pause",
-             "--language", "0", "--force-install-list", "2004"],
+             "--language", "0", *game_args, "--force-install-list", "2004"],
             cwd=root, text=True, capture_output=True, check=False, timeout=60,
         )
 

@@ -1,0 +1,43 @@
+OUTER_SPRINT bard_song_description ~The Bard can sing at will. A song lasts six rounds, plus one round for every five Bard levels. After activating a song, the Bard must wait one turn to sing again. The standard song protects allies from fear and morale failure, and grants +1 Luck. Luck rises to +2 at level 15 and +3 at level 20.~
+ACTION_IF GAME_IS ~iwdee~ BEGIN
+  OUTER_SPRINT bard_song_description ~The Bard can perform the following songs while the Bard Song modal is active.
+Level 1, Ballad of Three Heroes: Allies gain +1 to hit, damage and saving throws.
+Level 3, Tale of Curran Strongheart: Allies gain immunity to fear, and existing fear is removed.
+Level 5, Tymora's Melody: Allies gain +1 Luck, +3 to saving throws, +10 Lore and +10% to thieving skills.
+Level 7, Song of Kaudies: Allies have a 50% chance to shrug off sound-based attacks.
+Level 9, Siren's Yearning: Enemies must save vs. Spell or become enthralled for one round. Damage ends the enthrallment.
+Level 11, War Chant of Sith: Allies gain +2 Armor Class, 10% resistance to physical damage and regenerate 2 Hit Points per round.~
+END
+
+OUTER_SPRINT bard_armor_casting ~(Spells cannot be cast while wearing armor.)~
+ACTION_IF MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~2003~ BEGIN
+  OUTER_SPRINT bard_armor_casting ~(Spells may be cast while wearing up to studded leather armor.)~
+END
+
+OUTER_SPRINT bard_description ~BARD: A wandering musician and storyteller, the Bard uses charm, lore, arcane magic and song to support the party.
+
+Class features:
+– May not wear armor heavier than chain mail. %bard_armor_casting%
+– May not equip shields larger than bucklers.
+– Can become Proficient (one slot) in weapon and fighting-style proficiencies.
+– Can Pick Pockets and gains an increased Lore score.
+– Gains arcane spellcasting at 2nd level.
+– Alignment restricted to any neutral.
+– Hit Die: d6.
+
+Bard Song
+%bard_song_description%~
+
+ACTION_IF FILE_EXISTS_IN_GAME ~CLASTEXT.2DA~ BEGIN
+  COPY_EXISTING ~CLASTEXT.2DA~ ~override~
+    COUNT_2DA_COLS columns
+    READ_2DA_ENTRIES_NOW classes columns
+    FOR (row = 0; row < classes; ++row) BEGIN
+      READ_2DA_ENTRY_FORMER classes row 0 class_name
+      PATCH_IF ~%class_name%~ STRING_EQUAL_CASE ~BARD~ BEGIN
+        SET_2DA_ENTRY row 4 columns RESOLVE_STR_REF (~%bard_description%~)
+      END
+    END
+    PRETTY_PRINT_2DA
+  BUT_ONLY
+END

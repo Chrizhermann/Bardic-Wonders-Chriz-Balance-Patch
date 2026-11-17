@@ -74,7 +74,7 @@ class DisposableFixtureCliTests(unittest.TestCase):
 
     def test_builder_and_verifier_support_current_generated_resources(self) -> None:
         from .generated_fixture import generated_resources
-        from .test_weidu_finite_integration import HLA_TABLE
+        from .finite_fixtures import HLA_TABLE
         from .verify_fixture import verify
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

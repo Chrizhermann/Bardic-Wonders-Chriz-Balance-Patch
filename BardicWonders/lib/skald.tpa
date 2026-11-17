@@ -177,7 +177,14 @@ COPY_EXISTING ~C0EKCC1B.SPL~ OVERRIDE
 
 INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
 LAF c0bw_song_projectile STR_VAR resref = ~C0BWSPA~ RET song_projectile = projectile END
-ACTION_FOR_EACH song IN C0SKD02A SPCL542A BEGIN
-  COPY_EXISTING ~%song%.SPL~ ~override~
-    LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+COPY_EXISTING ~C0SKD02A.SPL~ ~override~
+  LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+LAF c0bw_song_projectile STR_VAR resref = ~C0AKSVA~ RET heroic_projectile = projectile END
+COPY_EXISTING ~C0CAV02B.SPL~ ~override~
+  LPF ALTER_SPELL_HEADER INT_VAR projectile = heroic_projectile END
+
+ACTION_IF GAME_IS ~iwdee~ BEGIN
+  LAF c0bw_song_projectile STR_VAR resref = ~C0BWSIA~ RET song_projectile = projectile END
 END
+COPY_EXISTING ~SPCL542A.SPL~ ~override~
+  LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END

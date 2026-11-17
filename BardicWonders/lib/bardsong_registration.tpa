@@ -1,0 +1,55 @@
+// Register known finite songs by resref. The source payload contributes its
+// effects. This component owns every payload projectile and the controller.
+DEFINE_ACTION_FUNCTION c0bw_wrap_song
+  INT_VAR payload_projectile = 1
+  STR_VAR bardsong_name = ""
+  RET song_name
+BEGIN
+  OUTER_SPRINT song_name ""
+  ACTION_IF FILE_EXISTS_IN_GAME ~%bardsong_name%.SPL~ BEGIN
+    OUTER_PATCH ~~ BEGIN
+      LPF GET_UNIQUE_FILE_NAME STR_VAR extension = ~SPL~ base = EVAL ~%bardsong_name%~ RET song_name = filename END
+      INNER_PATCH_SAVE song_name ~%song_name%~ BEGIN
+        REPLACE_TEXTUALLY CASE_INSENSITIVE EXACT_MATCH ~__~ ~C0BW~
+      END
+    END
+
+    COPY_EXISTING ~C0BARDX.SPL~ ~override~
+      LPF ADD_SPELL_EFFECT INT_VAR opcode = 309 target = 1 timing = 1
+        STR_VAR resource = EVAL ~%song_name%~
+      END
+
+    // Update explicit opcode-251 references to this song, including external
+    // assignments. An assignment's existence does not control the song write.
+    COPY_EXISTING_REGEXP GLOB ~.*[.]spl~ ~override~
+      READ_ASCII 0 spell_signature (8)
+      PATCH_IF ~%spell_signature%~ STRING_EQUAL_CASE ~SPL V1  ~ BEGIN
+        LPF CLONE_EFFECT INT_VAR silent = 1 match_opcode = 251 opcode = 326 target = 2
+          parameter2 = 0 parameter1 = 0 timing = 1
+          STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = ~C0BARDX~
+        END
+        LPF CLONE_EFFECT INT_VAR silent = 1 match_opcode = 251 opcode = 309 target = 2
+          parameter2 = 0 parameter1 = 1 timing = 4 duration = 1
+          STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~
+        END
+      END
+    BUT_ONLY
+
+    COPY_EXISTING ~%bardsong_name%.SPL~ ~override/%song_name%.SPL~
+      LPF ALTER_SPELL_HEADER INT_VAR projectile = payload_projectile END
+      LPF ALTER_EFFECT INT_VAR silent = 1
+        STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~
+      END
+    COPY ~%MOD_FOLDER%/bardsong/c0bardso.spl~ ~override/%bardsong_name%.SPL~
+      LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bardso END
+      LPF ALTER_EFFECT INT_VAR silent = 1 STR_VAR match_resource = BARDSONG resource = EVAL ~%song_name%~ END
+    COPY ~%MOD_FOLDER%/bardsong/c0bardso.eff~ ~override/%song_name%.EFF~
+      WRITE_ASCIIE 0x30 ~%song_name%~ (8)
+
+    ACTION_FOR_EACH baldur_script IN baldur bdbaldur baldur25 BEGIN
+      ACTION_IF FILE_EXISTS_IN_GAME ~%baldur_script%.BCS~ BEGIN
+        EXTEND_TOP ~%baldur_script%.BCS~ ~%MOD_FOLDER%/bardsong/script/baldur.baf~ EVAL
+      END
+    END
+  END
+END
