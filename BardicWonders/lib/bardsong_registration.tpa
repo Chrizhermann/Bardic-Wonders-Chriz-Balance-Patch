@@ -11,6 +11,27 @@ BEGIN
   END
 END
 
+// Match the original trigger: visit direct opcode-251 records in ability
+// effects and apply both clones for each encounter. The cloned effects still
+// match the selected song resref, including when the trigger names another song.
+DEFINE_PATCH_FUNCTION c0bw_link_external_song_assignment
+  STR_VAR bardsong_name = "" song_name = ""
+BEGIN
+  READ_LONG 0x64 ability_table
+  READ_SHORT 0x68 ability_count
+  READ_LONG 0x6A effect_table
+  FOR (ability_index = 0; ability_index < ability_count; ++ability_index) BEGIN
+    SET ability = ability_table + 0x28 * ability_index
+    READ_SHORT (ability + 0x1E) effect_count
+    READ_SHORT (ability + 0x20) first_effect
+    FOR (index = first_effect; index < first_effect + effect_count; ++index) BEGIN
+      PATCH_IF SHORT_AT (effect_table + 0x30 * index) = 251 BEGIN
+        LPF c0bw_link_song_assignment STR_VAR bardsong_name song_name END
+      END
+    END
+  END
+END
+
 // Share a private copy among a song's abilities with the same projectile.
 DEFINE_PATCH_FUNCTION c0bw_external_song_projectiles BEGIN
   PATCH_CLEAR_ARRAY c0bw_external_projectiles
@@ -67,12 +88,13 @@ BEGIN
     // Update explicit opcode-251 references to this song, including external
     // assignments. An assignment's existence does not control the song write.
     COPY_EXISTING_REGEXP GLOB ~.*[.]spl~ ~override~
-      SPRINT spell_signature ~~
-      PATCH_IF SOURCE_SIZE >= 0x72 BEGIN
+      PATCH_IF preserve_projectiles BEGIN
+        LPF c0bw_link_external_song_assignment STR_VAR bardsong_name song_name END
+      END ELSE PATCH_IF BUFFER_LENGTH > 0x71 BEGIN
         READ_ASCII 0 spell_signature (8)
-      END
-      PATCH_IF ~%spell_signature%~ STRING_EQUAL_CASE ~SPL V1  ~ BEGIN
-        LPF c0bw_link_song_assignment STR_VAR bardsong_name song_name END
+        PATCH_IF ~%spell_signature%~ STRING_EQUAL_CASE ~SPL V1  ~ BEGIN
+          LPF c0bw_link_song_assignment STR_VAR bardsong_name song_name END
+        END
       END
     BUT_ONLY
 
@@ -99,40 +121,12 @@ BEGIN
   END
 END
 
-DEFINE_PATCH_MACRO c0bw_find_song_assignment BEGIN
-  READ_SHORT effect opcode
-  PATCH_IF opcode = 251 BEGIN
-    READ_ASCII (effect + 0x14) assigned_song (8) NULL
-    TO_UPPER assigned_song
-    PATCH_IF ~%assigned_song%~ STRING_COMPARE ~~ BEGIN
-      DEFINE_ASSOCIATIVE_ARRAY c0bw_assigned_songs BEGIN ~%assigned_song%~ => 1 END
-    END
-  END
-END
-
-DEFINE_ACTION_FUNCTION c0bw_wrap_external_songs BEGIN
-  ACTION_CLEAR_ARRAY c0bw_assigned_songs
-  OUTER_SET c0bw_projectile_serial = 0
-
-  COPY_EXISTING_REGEXP GLOB ~.*[.]spl~ ~override~
-    SPRINT spell_signature ~~
-    PATCH_IF SOURCE_SIZE >= 0x72 BEGIN
-      READ_ASCII 0 spell_signature (8)
-    END
-    PATCH_IF ~%spell_signature%~ STRING_EQUAL_CASE ~SPL V1  ~ BEGIN
-      GET_OFFSET_ARRAY global_effects SPL_V10_GEN_EFFECTS
-      PHP_EACH global_effects AS effect_index => effect BEGIN
-        LPM c0bw_find_song_assignment
-      END
-      GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
-      PHP_EACH song_headers AS header_index => header BEGIN
-        GET_OFFSET_ARRAY2 header_effects header SPL_V10_HEAD_EFFECTS
-        PHP_EACH header_effects AS effect_index => effect BEGIN
-          LPM c0bw_find_song_assignment
-        END
-      END
-    END
-  BUT_ONLY
+// Snapshot the eligible source SPLs before generating any owned payloads.
+// Discovery is independent of how a song is assigned, including through EFFs.
+DEFINE_ACTION_FUNCTION c0bw_find_external_songs
+  RET_ARRAY c0bw_eligible_songs
+BEGIN
+  ACTION_CLEAR_ARRAY c0bw_eligible_songs
 
   // The stock modal and these kit songs already have dedicated continuous delivery.
   ACTION_FOR_EACH song IN BARDSONG C0BLDSO C0DANCSO C0DANCS2 C0STRASO BEGIN
@@ -144,40 +138,44 @@ DEFINE_ACTION_FUNCTION c0bw_wrap_external_songs BEGIN
     END
   END
 
-  ACTION_PHP_EACH c0bw_assigned_songs AS assigned_song => unused BEGIN
-    ACTION_IF !(VARIABLE_IS_SET $c0bw_owned_songs(~%assigned_song%~))
-      AND FILE_EXISTS_IN_GAME ~%assigned_song%.SPL~ BEGIN
-      // Preserve the original external-song eligibility rules. Owned songs
-      // have already been written and never pass through this check.
-      COPY_EXISTING ~%assigned_song%.SPL~ ~override~
+  COPY_EXISTING_REGEXP GLOB ~.*[.]spl~ ~override~
+    SPRINT song ~%SOURCE_RES%~
+    TO_UPPER song
+    PATCH_IF BUFFER_LENGTH > 0x71 AND NOT (VARIABLE_IS_SET $c0bw_owned_songs(~%song%~)) BEGIN
+      READ_BYTE 0x1C spell_type
+      PATCH_IF spell_type = 5 BEGIN
         SET has_song_icon = 0
         SET has_self_movement = 0
-        PATCH_IF SOURCE_SIZE >= 0x72 BEGIN
-          READ_ASCII 0 assigned_signature (8)
-          READ_BYTE 0x1C spell_type
-          PATCH_IF ~%assigned_signature%~ STRING_EQUAL_CASE ~SPL V1  ~ AND spell_type = 5 BEGIN
-            GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
-            PHP_EACH song_headers AS header_index => header BEGIN
-              GET_OFFSET_ARRAY2 header_effects header SPL_V10_HEAD_EFFECTS
-              PHP_EACH header_effects AS effect_index => effect BEGIN
-                READ_SHORT effect opcode
-                PATCH_IF opcode = 142 AND LONG_AT (effect + 0x08) = 40 BEGIN
-                  SET has_song_icon = 1
-                END
-                // The original check read the target and power as one word.
-                PATCH_IF opcode = 126 AND SHORT_AT (effect + 0x02) = 1 BEGIN
-                  SET has_self_movement = 1
-                END
-              END
+        READ_LONG 0x64 ability_table
+        READ_SHORT 0x68 ability_count
+        READ_LONG 0x6A effect_table
+        FOR (ability_index = 0; ability_index < ability_count; ++ability_index) BEGIN
+          SET ability = ability_table + 0x28 * ability_index
+          READ_SHORT (ability + 0x1E) effect_count
+          READ_SHORT (ability + 0x20) first_effect
+          FOR (index = first_effect; index < first_effect + effect_count; ++index) BEGIN
+            SET effect = effect_table + 0x30 * index
+            READ_SHORT effect opcode
+            PATCH_IF opcode = 142 AND SHORT_AT (effect + 0x08) = 40 BEGIN
+              SET has_song_icon = 1
+            END
+            // The original check read the target and power as one word.
+            PATCH_IF opcode = 126 AND SHORT_AT (effect + 0x02) = 1 BEGIN
+              SET has_self_movement = 1
             END
           END
         END
-      BUT_ONLY
-      ACTION_IF has_song_icon AND NOT has_self_movement BEGIN
-        LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1
-          STR_VAR bardsong_name = EVAL ~%assigned_song%~
+        PATCH_IF has_song_icon AND NOT has_self_movement BEGIN
+          DEFINE_ASSOCIATIVE_ARRAY c0bw_eligible_songs BEGIN ~%song%~ => 1 END
         END
       END
     END
+  BUT_ONLY
+END
+
+DEFINE_ACTION_FUNCTION c0bw_wrap_external_songs BEGIN
+  OUTER_SET c0bw_projectile_serial = 0
+  ACTION_PHP_EACH c0bw_eligible_songs AS song => unused BEGIN
+    LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1 STR_VAR bardsong_name = EVAL ~%song%~ END
   END
 END

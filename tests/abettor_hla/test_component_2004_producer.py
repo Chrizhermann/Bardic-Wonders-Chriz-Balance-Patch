@@ -71,6 +71,31 @@ def song_with_self_targeted_movement(source: bytes) -> bytes:
     raise AssertionError("Fixture needs a non-icon ability effect")
 
 
+def song_with_wide_icon_parameter(source: bytes) -> bytes:
+    song = bytearray(source)
+    effects = struct.unpack_from("<I", song, 0x6A)[0]
+    for offset in range(effects, len(song), 48):
+        if struct.unpack_from("<H", song, offset)[0] == 142 and struct.unpack_from("<H", song, offset + 8)[0] == 40:
+            struct.pack_into("<I", song, offset + 8, 0x00010028)
+            return bytes(song)
+    raise AssertionError("Fixture needs an opcode-142 effect for icon 40")
+
+
+def effect_assigned_song() -> tuple[bytes, bytes]:
+    spell = bytearray((MOD / "abettor/c0abethl.spl").read_bytes())
+    effects = struct.unpack_from("<I", spell, 0x6A)[0]
+    for offset in range(effects, len(spell), 48):
+        if struct.unpack_from("<H", spell, offset)[0] == 251:
+            struct.pack_into("<H", spell, offset, 177)
+            struct.pack_into("<II", spell, offset + 4, 5, 5)
+            spell[offset + 0x14:offset + 0x1C] = b"XQCHOOSE"
+    # Use a valid EFF V2 envelope and an opcode-251 song selection.
+    choose = bytearray((MOD / "bardsong/c0bardso.eff").read_bytes())
+    struct.pack_into("<IIIII", choose, 0x10, 251, 2, 0, 0, 0)
+    choose[0x30:0x38] = b"XQSONG\0\0"
+    return bytes(spell), bytes(choose)
+
+
 class Component2004ProducerTests(unittest.TestCase):
     def make_fixture(self, root: Path, *, existing_projectile: int, reserve_payload_name: bool = False, snapshot: bool = True) -> None:
         override = root / "override"
@@ -230,8 +255,10 @@ class Component2004ProducerTests(unittest.TestCase):
             payload = resource(override, pulse + ".SPL")
             assign = parse_spl(resource(override, "XQASSIGN.SPL"))
             self.assertEqual(1, len(assign.find_effects(opcode=251, resource="XQSONG")))
-            self.assertEqual(1, len(assign.find_effects(opcode=326, resource="C0BARDX")))
-            self.assertEqual(1, len(assign.find_effects(opcode=309, resource=pulse)))
+            # The legacy in-place traversal encounters the moved opcode 251
+            # again after cloning. WeiDU emits three pairs for this fixture.
+            self.assertEqual(3, len(assign.find_effects(opcode=326, resource="C0BARDX")))
+            self.assertEqual(3, len(assign.find_effects(opcode=309, resource=pulse)))
             self.assertEqual(before_effects, effect_records(payload))
             self.assertEqual(pulse, read_eff_resource(resource(override, pulse + ".EFF")))
             projectiles = {}
@@ -257,6 +284,66 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertEqual(song, original.read_bytes())
             self.assertEqual(assignment, resource(override, "XQASSIGN.SPL").read_bytes())
             self.assertFalse(any(path.name.upper() in {"C0P1.PRO", "C0P2.PRO"} for path in override.iterdir()))
+
+    def test_external_song_discovery_reads_the_low_word_of_the_icon(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song = song_with_wide_icon_parameter((MOD / "abettor/c0abets2.spl").read_bytes())
+            source = override / "XQSONG.SPL"
+            source.write_bytes(song)
+            assignment = override / "XQASSIGN.SPL"
+            assignment.write_bytes((MOD / "abettor/c0abethl.spl").read_bytes().replace(b"C0ABETS2", b"XQSONG\0\0"))
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            pulse = next(e.resource for e in parse_spl(source).abilities[0].effects if e.opcode == 272)
+            assigned = parse_spl(assignment)
+            self.assertEqual(1, len(assigned.find_effects(opcode=251, resource="XQSONG")))
+            self.assertEqual(3, len(assigned.find_effects(opcode=326, resource="C0BARDX")))
+            self.assertEqual(3, len(assigned.find_effects(opcode=309, resource=pulse)))
+            payload = parse_spl(resource(override, pulse + ".SPL"))
+            self.assertEqual(1, len(payload.find_effects(opcode=142, parameter2=0x00010028)))
+
+    def test_external_song_is_discovered_when_assigned_only_through_an_eff(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song = bytearray((MOD / "abettor/c0abets2.spl").read_bytes())
+            header = struct.unpack_from("<I", song, 0x64)[0]
+            struct.pack_into("<H", song, header + 0x26, 481)
+            song_file = override / "XQSONG.SPL"
+            song_file.write_bytes(song)
+            (override / "XQNOLINK.SPL").write_bytes(song)
+            with resource(override, "PROJECTL.IDS").open("a", encoding="ascii") as ids:
+                ids.write("480 INAREAPA\n")
+            shared = (override / "INAREAPA.PRO").read_bytes()
+            spell, effect = effect_assigned_song()
+            assignment = override / "XQASSIGN.SPL"
+            choose = override / "XQCHOOSE.EFF"
+            assignment.write_bytes(spell)
+            choose.write_bytes(effect)
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(spell, assignment.read_bytes())
+            self.assertEqual(effect, choose.read_bytes())
+            self.assertEqual(shared, (override / "INAREAPA.PRO").read_bytes())
+            ids = {int(index) + 1: name.upper()
+                   for index, name, *_ in (line.split() for line in resource(override, "PROJECTL.IDS").read_text().splitlines())
+                   if index.isdigit()}
+            expected = bytearray(shared)
+            expected[0x0C] |= 0x40
+            for source in (song_file, override / "XQNOLINK.SPL"):
+                wrapper = parse_spl(source)
+                self.assertEqual({"C0BARDSO"}, {ids[a.projectile] for a in wrapper.abilities})
+                pulse = next(e.resource for e in wrapper.abilities[0].effects if e.opcode == 272)
+                self.assertEqual(pulse, read_eff_resource(resource(override, pulse + ".EFF")))
+                payload = parse_spl(resource(override, pulse + ".SPL"))
+                for ability in payload.abilities:
+                    private = ids[ability.projectile]
+                    self.assertNotEqual("INAREAPA", private)
+                    self.assertEqual(expected, resource(override, private + ".PRO").read_bytes())
 
     def test_external_assignment_preserves_legacy_exemptions(self) -> None:
         source = (MOD / "abettor/c0abets2.spl").read_bytes()

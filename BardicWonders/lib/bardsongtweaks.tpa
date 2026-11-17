@@ -110,11 +110,15 @@ END
 
 ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
   OUTER_SET $c0bw_owned_songs(~%song%~) = 1
+END
+OUTER_SET $c0bw_owned_songs(C0ABETS2) = 1
+LAF c0bw_find_external_songs RET_ARRAY c0bw_eligible_songs END
+
+ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
   LAF c0bw_wrap_song INT_VAR payload_projectile = EVAL ~%profile%~
     STR_VAR bardsong_name = EVAL ~%song%~
   END
 END
-OUTER_SET $c0bw_owned_songs(C0ABETS2) = 1
 LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile STR_VAR bardsong_name = ~C0ABETS2~
   RET symphony_payload = song_name
 END
