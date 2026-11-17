@@ -11,6 +11,7 @@ BEGIN
 END
 
 DEFINE_PATCH_FUNCTION c0bw_validate_spl
+  INT_VAR insertions_per_ability = 0
   RET c0bw_valid
 BEGIN
   LPF c0bw_has_header INT_VAR minimum_size = 0x72 STR_VAR signature = ~SPL V1  ~ RET c0bw_valid END
@@ -33,33 +34,75 @@ BEGIN
       SET c0bw_valid = ability_count = 0 OR effect_table >= ability_table + ability_count * 0x28
     END
     PATCH_IF c0bw_valid BEGIN
+      SET effect_slots = (SOURCE_SIZE - effect_table) / 0x30
       SET max_effect_end = 0
+      SET max_ability_end = 0
       PATCH_IF global_count > 0 BEGIN
         SET max_effect_end = global_first + global_count
       END
-      FOR (i = 0; i < ability_count; ++i) BEGIN
+      SET c0bw_valid = max_effect_end <= effect_slots
+      FOR (i = 0; c0bw_valid AND i < ability_count; ++i) BEGIN
         SET ability = ability_table + i * 0x28
         READ_SHORT (ability + 0x1E) effect_count
         READ_SHORT (ability + 0x20) first_effect
-        PATCH_IF effect_count > 0 AND first_effect + effect_count > max_effect_end BEGIN
-          SET max_effect_end = first_effect + effect_count
+        PATCH_IF effect_count > 0 BEGIN
+          SET effect_end = first_effect + effect_count
+          SET c0bw_valid = effect_end <= effect_slots
+            AND (global_count = 0 OR effect_end <= global_first OR first_effect >= global_first + global_count)
+          // Packed ability spans usually arrive in order. Check earlier
+          // spans only when this one starts below an earlier end.
+          PATCH_IF c0bw_valid AND first_effect < max_ability_end BEGIN
+            FOR (j = 0; c0bw_valid AND j < i; ++j) BEGIN
+              SET previous = ability_table + j * 0x28
+              READ_SHORT (previous + 0x1E) previous_count
+              READ_SHORT (previous + 0x20) previous_first
+              SET c0bw_valid = previous_count = 0 OR effect_end <= previous_first
+                OR first_effect >= previous_first + previous_count
+            END
+          END
+          SET max_ability_end = effect_end > max_ability_end ? effect_end : max_ability_end
+          SET max_effect_end = effect_end > max_effect_end ? effect_end : max_effect_end
         END
       END
-      SET c0bw_valid = max_effect_end <= (SOURCE_SIZE - effect_table) / 0x30
+      PATCH_IF c0bw_valid AND insertions_per_ability > 0 BEGIN
+        SET c0bw_valid = ability_count > 0
+          AND max_effect_end + ability_count * insertions_per_ability <= 0x10000
+      END
     END
   END
 END
 
 // A zero-count ability has no effect span. ADD_SPELL_EFFECT still uses its
-// index as an insertion point. Clamp out-of-file indices to the end of the
-// effect slots so insertion does not move existing casting effects.
-DEFINE_PATCH_FUNCTION c0bw_prepare_effect_insertion BEGIN
-  SET effect_slots = (BUFFER_LENGTH - LONG_AT 0x6A) / 0x30
+// index as an insertion point. Use the last referenced slot plus one for all
+// empty abilities, independent of unused indices or bytes after the effects.
+DEFINE_PATCH_FUNCTION c0bw_prepare_effect_insertion
+  INT_VAR selected_header = 0
+BEGIN
+  READ_SHORT 0x6E casting_first
+  READ_SHORT 0x70 casting_count
+  SET append_index = casting_count > 0 ? casting_first + casting_count : 0
+  SET casting_shift = 0
   GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
   PHP_EACH song_headers AS header_index => header BEGIN
-    PATCH_IF SHORT_AT (header + 0x1E) = 0 AND SHORT_AT (header + 0x20) > effect_slots BEGIN
-      WRITE_SHORT (header + 0x20) effect_slots
+    READ_SHORT (header + 0x1E) effect_count
+    READ_SHORT (header + 0x20) first_effect
+    PATCH_IF effect_count > 0 BEGIN
+      SET effect_end = first_effect + effect_count
+      SET append_index = effect_end > append_index ? effect_end : append_index
+      // WeiDU moves ability indices after insertion but leaves +0x6E alone.
+      PATCH_IF casting_count > 0 AND effect_end <= casting_first
+        AND (selected_header = 0 OR selected_header = header_index + 1) BEGIN
+        SET casting_shift += 1
+      END
     END
+  END
+  PHP_EACH song_headers AS header_index => header BEGIN
+    PATCH_IF SHORT_AT (header + 0x1E) = 0 BEGIN
+      WRITE_SHORT (header + 0x20) append_index
+    END
+  END
+  PATCH_IF casting_shift > 0 BEGIN
+    WRITE_SHORT 0x6E (casting_first + casting_shift)
   END
 END
 
@@ -73,6 +116,13 @@ END
 
 DEFINE_PATCH_MACRO c0bw_guard_spl BEGIN
   LPF c0bw_validate_spl RET c0bw_valid END
+  PATCH_IF NOT c0bw_valid BEGIN
+    LPM c0bw_record_damage
+  END
+END
+
+DEFINE_PATCH_MACRO c0bw_guard_song_loader BEGIN
+  LPF c0bw_validate_spl INT_VAR insertions_per_ability = 1 RET c0bw_valid END
   PATCH_IF NOT c0bw_valid BEGIN
     LPM c0bw_record_damage
   END
@@ -190,8 +240,7 @@ BEGIN
       SET source_song_valid = c0bw_valid
     BUT_ONLY
     COPY_EXISTING ~C0BARDX.SPL~ ~override~
-      LPF c0bw_prepare_effect_insertion END
-      LPM c0bw_guard_spl
+      LPM c0bw_guard_song_loader
       SET source_song_valid = source_song_valid AND c0bw_valid
     BUT_ONLY
     COPY ~%MOD_FOLDER%/bardsong/c0bardso.spl~ ~override~
@@ -212,6 +261,7 @@ BEGIN
     END
 
     COPY_EXISTING ~C0BARDX.SPL~ ~override~
+      LPF c0bw_prepare_effect_insertion END
       LPF ADD_SPELL_EFFECT INT_VAR opcode = 309 target = 1 timing = 1
         STR_VAR resource = EVAL ~%song_name%~
       END

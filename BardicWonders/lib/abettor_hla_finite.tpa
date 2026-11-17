@@ -37,6 +37,7 @@ ACTION_IF symphony_templates_valid BEGIN
     // The shipped controller has 600 ticks at level one and adds 100 ticks
     // per header. Mode 4 takes whole seconds, rounded up at 15 ticks/second.
     FOR (song_header = 1; song_header <= 11; ++song_header) BEGIN
+      LPF c0bw_prepare_effect_insertion INT_VAR selected_header = song_header END
       LPF ADD_SPELL_EFFECT INT_VAR header = song_header opcode = 326 target = 9 timing = 4
         duration = (600 + (song_header - 1) * 100 + 14) / 15
         probability1 = 100 probability2 = 0

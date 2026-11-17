@@ -142,6 +142,40 @@ def empty_song_loader_with_casting_effect() -> bytes:
     return bytes(loader)
 
 
+def song_loader_with_shared_effect_table(empty_index: int, *, multiple: bool = False,
+                                         overlap: str = "", casting_last: bool = False) -> bytes:
+    source = empty_song_loader_with_casting_effect()
+    ability_count = 2 if multiple else 1
+    effect_offset = 0x72 + 0x28 * ability_count
+    casting_first = 2 if casting_last else 0
+    loader = bytearray(source[:0x72] + source[0x72:0x9A] * ability_count)
+    struct.pack_into("<IHIHH", loader, 0x64, 0x72, ability_count, effect_offset, casting_first, 1)
+    casting = source[0x9A:]
+    if multiple:
+        first = 0 if casting_last or overlap == "casting" else 1
+        struct.pack_into("<HH", loader, 0x72 + 0x1E, 2, first)
+        final_count = 1 if overlap == "abilities" else 0
+        struct.pack_into("<HH", loader, 0x9A + 0x1E, final_count, empty_index)
+        ability_effects = (struct.pack("<H", 101) + bytes(0x2E)) + (struct.pack("<H", 142) + bytes(0x2E))
+        loader.extend(ability_effects + casting if casting_last else casting + ability_effects)
+    else:
+        struct.pack_into("<H", loader, 0x72 + 0x20, empty_index)
+        loader.extend(casting)
+    return bytes(loader)
+
+
+def duplicate_first_ability(spell: bytearray) -> None:
+    headers, count, effects = struct.unpack_from("<IHI", spell, 0x64)
+    added_header = spell[headers:headers + 0x28]
+    effect_count, first = struct.unpack_from("<HH", added_header, 0x1E)
+    records = spell[effects + first * 0x30:effects + (first + effect_count) * 0x30]
+    # Keep identical effect bytes in disjoint slots.
+    struct.pack_into("<H", added_header, 0x20, (len(spell) - effects) // 0x30)
+    spell[effects:effects] = added_header
+    struct.pack_into("<HI", spell, 0x68, count + 1, effects + 0x28)
+    spell.extend(records)
+
+
 class Component2004ProducerTests(unittest.TestCase):
     def make_fixture(self, root: Path, *, existing_projectile: int, reserve_payload_name: bool = False, snapshot: bool = True) -> None:
         override = root / "override"
@@ -283,11 +317,7 @@ class Component2004ProducerTests(unittest.TestCase):
             headers, count = struct.unpack_from("<IH", song, 0x64)
             # The two projectile variants must keep their original profiles.
             self.assertGreater(count, 0)
-            extra = song[headers:headers + 40]
-            effects = struct.unpack_from("<I", song, 0x6A)[0]
-            song[effects:effects] = extra
-            struct.pack_into("<H", song, 0x68, count + 1)
-            struct.pack_into("<I", song, 0x6A, effects + 40)
+            duplicate_first_ability(song)
             for i in range(count + 1):
                 struct.pack_into("<H", song, headers + i * 40 + 0x26, 481 if i == 0 else 482)
             original.write_bytes(song)
@@ -473,7 +503,7 @@ class Component2004ProducerTests(unittest.TestCase):
                 self.make_fixture(root, existing_projectile=520, snapshot=False)
                 packaged = root / "testmod/bardsong/c0bardx.spl"
                 override = root / "override"
-                prior = packaged.read_bytes()
+                prior = song_loader_with_layout(0x72, 0xFFFFFFFF)
                 (override / "C0BARDX.SPL").write_bytes(prior)
                 packaged.write_bytes(data)
                 song = resource(override, "C0ABETS2.SPL")
@@ -505,6 +535,103 @@ class Component2004ProducerTests(unittest.TestCase):
                 installed = resource(override, "C0BARDX.SPL")
                 self.assertTrue(parse_spl(installed).find_effects(opcode=309, resource=pulse))
                 self.assertEqual(effect_records(packaged)[0], effect_records(installed)[0])
+
+    def seed_bard_clabs(self, override: Path, grant: str = "****") -> None:
+        resource(override, "KITLIST.2DA").write_text(
+            "2DA V1.0\n*\n LABEL NAME LOWER MIXED HELP CLAB PROF UNUSABLE CLASS KITIDS\n"
+            "0 MAGE 0 0 0 CLABMA01 0 0 1 0\n1 FORKBARD 0 0 0 XQCLAB 0 0 5 0\n",
+            encoding="ascii",
+        )
+        for name in ("CLABBA01", "XQCLAB"):
+            (override / f"{name}.2DA").write_text(
+                f"2DA V1.0\n****\n  1 2\nABILITY1 {grant} AP_KEEP\n", encoding="ascii",
+            )
+
+    def test_damaged_or_missing_package_without_usable_loader_clears_bard_grants(self) -> None:
+        for mode in ("damaged", "missing", "damaged installed"):
+            with self.subTest(mode=mode), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                packaged = root / "testmod/bardsong/c0bardx.spl"
+                override = root / "override"
+                self.seed_bard_clabs(override, "AP_C0BARDX" if mode != "damaged" else "****")
+                invalid = song_loader_with_layout(0x72, 0xFFFFFFFF)
+                if mode == "missing":
+                    packaged.unlink()
+                else:
+                    packaged.write_bytes(invalid)
+                if mode == "damaged installed":
+                    (override / "C0BARDX.SPL").write_bytes(invalid)
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                message = "MISSING PACKAGED" if mode == "missing" else "SKIPPING DAMAGED"
+                self.assertEqual(1, result.stdout.upper().count(f"{message} C0BARDX.SPL"))
+                for name in ("CLABBA01.2DA", "XQCLAB.2DA"):
+                    fields = resource(override, name).read_text().split()
+                    self.assertNotIn("AP_C0BARDX", fields)
+                    self.assertIn("AP_KEEP", fields)
+
+    def test_installed_loader_fallback_grants_and_wraps_valid_external_song(self) -> None:
+        for mode in ("damaged", "missing"):
+            with self.subTest(mode=mode), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                packaged = root / "testmod/bardsong/c0bardx.spl"
+                override = root / "override"
+                self.seed_bard_clabs(override, "AP_C0BARDX")
+                loader = override / "C0BARDX.SPL"
+                loader.write_bytes(song_loader_with_shared_effect_table(0))
+                original_casting, original_abilities = effect_records(loader)
+                if mode == "damaged":
+                    packaged.write_bytes(song_loader_with_layout(0x72, 0xFFFFFFFF))
+                else:
+                    packaged.unlink()
+                song = bytearray((MOD / "abettor/c0abets2.spl").read_bytes())
+                ability, = struct.unpack_from("<I", song, 0x64)
+                struct.pack_into("<H", song, ability + 0x26, 481)
+                (override / "XQSONG.SPL").write_bytes(song)
+                ids = resource(override, "PROJECTL.IDS")
+                with ids.open("a", encoding="ascii") as out:
+                    out.write("480 INAREAPA\n")
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                message = "MISSING PACKAGED" if mode == "missing" else "SKIPPING DAMAGED"
+                self.assertEqual(1, result.stdout.upper().count(f"{message} C0BARDX.SPL"))
+                for name in ("CLABBA01.2DA", "XQCLAB.2DA"):
+                    fields = resource(override, name).read_text().split()
+                    self.assertEqual(1, fields.count("AP_C0BARDX"))
+                    self.assertIn("AP_KEEP", fields)
+                wrapper = parse_spl(resource(override, "XQSONG.SPL"))
+                pulse = next(e.resource for e in wrapper.abilities[0].effects if e.opcode == 272)
+                self.assertEqual(original_casting, effect_records(loader)[0])
+                self.assertEqual(original_abilities[0], effect_records(loader)[1][0][:len(original_abilities[0])])
+                self.assertTrue(parse_spl(loader).find_effects(opcode=309, resource=pulse))
+                projectile = parse_spl(resource(override, pulse + ".SPL")).abilities[0].projectile
+                private = next(parts[1] for parts in map(str.split, ids.read_text().splitlines())
+                               if len(parts) >= 2 and parts[0].isdigit() and int(parts[0]) + 1 == projectile)
+                self.assertNotEqual("INAREAPA", private.upper())
+                self.assertTrue(resource(override, private + ".PRO").read_bytes()[0x0C] & 0x40)
+
+    def test_empty_ability_inserts_after_all_referenced_effects(self) -> None:
+        for multiple, index, casting_last in ((False, 0, False), (True, 0, False), (True, 1, False), (True, 0, True)):
+            with self.subTest(multiple=multiple, index=index, casting_last=casting_last), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                packaged = root / "testmod/bardsong/c0bardx.spl"
+                packaged.write_bytes(song_loader_with_shared_effect_table(index, multiple=multiple, casting_last=casting_last))
+                casting, abilities = effect_records(packaged)
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                loader = resource(root / "override", "C0BARDX.SPL")
+                added = parse_spl(loader)
+                after_casting, after_abilities = effect_records(loader)
+                self.assertEqual(casting, after_casting)
+                for before, after, ability in zip(abilities, after_abilities, added.abilities, strict=True):
+                    self.assertEqual(before, after[:len(before)])
+                    self.assertTrue(any(e.opcode == 309 for e in ability.effects[len(before):]))
+
+    def test_overlapping_nonempty_casting_or_ability_spans_are_skipped(self) -> None:
+        self.assert_damaged_inputs_are_isolated({
+            "XQOVG.SPL": song_loader_with_shared_effect_table(0, multiple=True, overlap="casting"),
+            "XQOVA.SPL": song_loader_with_shared_effect_table(1, multiple=True, overlap="abilities"),
+        })
 
     def test_projectile_donor_requires_all_type_specific_blocks(self) -> None:
         source = (MOD / "bardsong/c0bardso.PRO").read_bytes()
@@ -626,10 +753,7 @@ class Component2004ProducerTests(unittest.TestCase):
             # Add a valid second ability and a global effect. Legacy layouts
             # and counts must not veto rebuilding the owned controller.
             count = struct.unpack_from("<H", old_song, 0x68)[0]
-            added_header = old_song[ability:ability + 40]
-            old_song[effect:effect] = added_header
-            struct.pack_into("<H", old_song, 0x68, count + 1)
-            struct.pack_into("<I", old_song, 0x6A, effect + 40)
+            duplicate_first_ability(old_song)
             global_first = (len(old_song) - (effect + 40)) // 48
             struct.pack_into("<HH", old_song, 0x6E, global_first, 1)
             old_song.extend(struct.pack("<H", 142) + bytes(46))
