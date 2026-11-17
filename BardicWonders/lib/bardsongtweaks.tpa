@@ -67,40 +67,62 @@ ACTION_IF GAME_IS ~iwdee~ BEGIN
     LPF ALTER_SPELL_HEADER INT_VAR projectile = song_enemy_projectile END
   COPY_EXISTING ~SPCL920A.SPL~ ~override~
     LPF ALTER_SPELL_HEADER INT_VAR projectile = song_party_projectile END
-  ACTION_IF MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~1002~ BEGIN
-    LAF c0bw_wrap_song INT_VAR payload_projectile = song_enemy_projectile STR_VAR bardsong_name = ~SPCL751A~ END
-  END ELSE BEGIN
+  ACTION_IF NOT MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~1002~ BEGIN
     COPY_EXISTING ~SPCL751A.SPL~ ~override~
       LPF ALTER_SPELL_HEADER INT_VAR projectile = song_enemy_projectile END
   END
-END ELSE BEGIN
-  LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile STR_VAR bardsong_name = ~SPCL542A~ END
-  LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile STR_VAR bardsong_name = ~SPCL920A~ END
-  LAF c0bw_wrap_song INT_VAR payload_projectile = song_enemy_projectile STR_VAR bardsong_name = ~SPCL751A~ END
 END
 
-ACTION_FOR_EACH song IN FJBARDA FJBLADEB C0ABETSO C0KM#SO C0KM#SOH C0SKD02A C0TRBSO C0TRBSO2 BEGIN
-  LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile STR_VAR bardsong_name = EVAL ~%song%~ END
+ACTION_CLEAR_ARRAY c0bw_owned_songs
+ACTION_CLEAR_ARRAY c0bw_owned_finite_songs
+ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN
+  FJBARDA => song_party_projectile
+  FJBLADEB => song_party_projectile
+  FJBARDB => stock_bard_projectile
+  C0ABETSO => song_party_projectile
+  C0KM#SO => song_party_projectile
+  C0KM#SOH => song_party_projectile
+  C0SKD02A => song_party_projectile
+  C0TRBSO => song_party_projectile
+  C0TRBSO2 => song_party_projectile
+  C0DESP7 => 1
+  C0DESP9 => 1
+  C0BDD#S2 => song_narrow_enemy_projectile
+  C0JES03A => song_narrow_enemy_projectile
+  C0SDRUS2 => song_narrow_enemy_projectile
+  C0SDRUSO => song_narrow_enemy_projectile
 END
-LAF c0bw_wrap_song INT_VAR payload_projectile = stock_bard_projectile STR_VAR bardsong_name = ~FJBARDB~ END
-ACTION_FOR_EACH song IN C0DESP7 C0DESP9 BEGIN
-  LAF c0bw_wrap_song INT_VAR payload_projectile = 1 STR_VAR bardsong_name = EVAL ~%song%~ END
-END
-ACTION_FOR_EACH song IN C0BDD#S2 C0JES03A C0SDRUS2 C0SDRUSO BEGIN
-  LAF c0bw_wrap_song INT_VAR payload_projectile = song_narrow_enemy_projectile STR_VAR bardsong_name = EVAL ~%song%~ END
+ACTION_IF NOT GAME_IS ~iwdee~ BEGIN
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN
+    SPCL542A => song_party_projectile
+    SPCL920A => song_party_projectile
+    SPCL751A => song_enemy_projectile
+  END
+END ELSE ACTION_IF MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~1002~ BEGIN
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN SPCL751A => song_enemy_projectile END
 END
 ACTION_IF FILE_EXISTS_IN_GAME ~C0BDD#SO.SPL~ BEGIN
   ADD_PROJECTILE ~%MOD_FOLDER%/darkbloom/c0bdd#so.PRO~ ~Bard Song Ignore Caster~
   COPY ~%MOD_FOLDER%/darkbloom/c0bdd#so.PRO~ ~override~
   OUTER_SET darkbloom_projectile = IDS_OF_SYMBOL (~PROJECTL~ ~C0BDD#SO~) + 1
-  LAF c0bw_wrap_song INT_VAR payload_projectile = darkbloom_projectile STR_VAR bardsong_name = ~C0BDD#SO~ END
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN C0BDD#SO => darkbloom_projectile END
 END
+
+ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
+  OUTER_SET $c0bw_owned_songs(~%song%~) = 1
+  LAF c0bw_wrap_song INT_VAR payload_projectile = EVAL ~%profile%~
+    STR_VAR bardsong_name = EVAL ~%song%~
+  END
+END
+OUTER_SET $c0bw_owned_songs(C0ABETS2) = 1
 LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile STR_VAR bardsong_name = ~C0ABETS2~
   RET symphony_payload = song_name
 END
 
 INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
+LAF c0bw_wrap_external_songs END
 INCLUDE ~%MOD_FOLDER%/lib/bardsong_description.tpa~
+LAF c0bw_write_song_description END
 
 COPY_EXISTING ~enginest.2da~ ~override~
   COUNT_2DA_ROWS 2 rows

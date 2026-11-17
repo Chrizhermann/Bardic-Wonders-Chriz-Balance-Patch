@@ -14,6 +14,7 @@ ALWAYS
   INCLUDE ~%MOD_FOLDER%/lib/replace_multiline.tpa~
   INCLUDE ~%MOD_FOLDER%/lib/priest_spell_import.tpa~
   INCLUDE ~%MOD_FOLDER%/lib/gallant_new_spells.tpa~
+  INCLUDE ~%MOD_FOLDER%/lib/bardsong_description.tpa~
 END
 LANGUAGE ~English~
          ~English~
@@ -75,6 +76,7 @@ INCLUDE ~%MOD_FOLDER%/LIB/itempack.tpa~
 BEGIN ~Bardic Wonders: Inspirations~ DESIGNATED 2002
 GROUP ~Items & Abilities~
 INCLUDE ~%MOD_FOLDER%/LIB/inspirations.tpa~
+LAF c0bw_write_song_description INT_VAR current_component = 2002 END
 
 BEGIN ~Bardic Wonders: High Level Abilities~ DESIGNATED 2007
 GROUP ~Items & Abilities~
@@ -87,6 +89,7 @@ INCLUDE ~%MOD_FOLDER%/LIB/new_spells.tpa~
 BEGIN ~Bardic Wonders: Armored Casting for Bards~ DESIGNATED 2003
 GROUP ~Tweaks & Patches~
 INCLUDE ~%MOD_FOLDER%/LIB/armored_casting.tpa~
+LAF c0bw_write_song_description INT_VAR current_component = 2003 END
 
 BEGIN ~Bardic Wonders: Bard Song Mechanics Tweak~ DESIGNATED 2004
 GROUP ~Tweaks & Patches~
@@ -95,14 +98,17 @@ INCLUDE ~%MOD_FOLDER%/LIB/bardsongtweaks.tpa~
 BEGIN ~Bardic Wonders: Item Restriction Tweaks—Bards may use mage items and priest scrolls~ DESIGNATED 2005
 GROUP ~Tweaks & Patches~
 INCLUDE ~%MOD_FOLDER%/LIB/mage_items.tpa~
+LAF c0bw_write_song_description INT_VAR current_component = 2005 END
 
 BEGIN ~Bardic Wonders: Item Restriction Tweaks—Bards may use Small and Medium Shields~ DESIGNATED 2012
 GROUP ~Tweaks & Patches~
 INCLUDE ~%MOD_FOLDER%/LIB/shields.tpa~
+LAF c0bw_write_song_description INT_VAR current_component = 2012 END
 
 BEGIN ~Bardic Wonders: Item Restriction Tweaks—Bards may use Helmets~ DESIGNATED 2013
 GROUP ~Tweaks & Patches~
 INCLUDE ~%MOD_FOLDER%/LIB/helmets.tpa~
+LAF c0bw_write_song_description INT_VAR current_component = 2013 END
 
 BEGIN ~Bardic Wonders: Bard Song Overhead Visual Effect~ DESIGNATED 2006
 GROUP ~Tweaks & Patches~
@@ -116,10 +122,12 @@ INCLUDE ~%MOD_FOLDER%/LIB/mage_bard.tpa~
 BEGIN ~Bardic Wonders: 3e Alignment for Bards (any non-lawful)~ DESIGNATED 2010
 GROUP ~Tweaks & Patches~
 INCLUDE ~%MOD_FOLDER%/LIB/alignment.tpa~
+LAF c0bw_write_song_description INT_VAR current_component = 2010 END
 
 BEGIN ~Bardic Wonders: Bard Casting Level Begins from 2nd level~ DESIGNATED 2011
 GROUP ~Tweaks & Patches~
 INCLUDE ~%MOD_FOLDER%/LIB/spell_level.tpa~
+LAF c0bw_write_song_description INT_VAR current_component = 2011 END
 
 BEGIN ~Bardic Wonders: Patch Dialogue Class Checks for: Gallant, Mage/Bard and Fighter/Mage/Bard (install late)~ DESIGNATED 3001
 GROUP ~Tweaks & Patches~

@@ -1,10 +1,11 @@
 """Run the real component-2004 producer before validating its finite controller.
 
-All inputs come from the repository; WeiDU runs only inside TemporaryDirectory.
+All inputs come from the repository; WeiDU runs only in disposable directories.
 In particular, these tests never manufacture a C0ABETS2 controller or its EFF.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import struct
@@ -20,6 +21,15 @@ from .finite_fixtures import HLA_TABLE, is_finale, song_ticks
 ROOT = Path(__file__).resolve().parents[2]
 MOD = ROOT / "BardicWonders"
 WEIDU = ROOT / "Setup-BardicWonders.exe"
+
+
+@contextmanager
+def disposable_game():
+    root = Path(tempfile.mkdtemp(prefix="sol62-bardic-unit-"))
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def resource(directory: Path, name: str) -> Path:
@@ -55,7 +65,7 @@ class Component2004ProducerTests(unittest.TestCase):
         library.mkdir(parents=True)
         shutil.copytree(MOD / "bardsong", root / "testmod" / "bardsong")
         for name in ("bardsongtweaks.tpa", "functions.tph", "hla_actions.tpa", "song_projectile.tpa",
-                     "bardsong_registration.tpa", "bardsong_description.tpa"):
+                     "bardsong_registration.tpa", "bardsong_description.tpa", "abettor_symphony.tpa"):
             shutil.copy2(MOD / "lib" / name, library / name)
         shutil.copy2(MOD / "lib" / "abettor_hla_finite.tpa", library / "finite_actual.tpa")
         # Capture what the unchanged producer actually emits immediately before
@@ -65,6 +75,9 @@ class Component2004ProducerTests(unittest.TestCase):
             + "INCLUDE ~testmod/lib/finite_actual.tpa~\n",
             encoding="ascii",
         )
+        canonical = root / "testmod" / "abettor"
+        canonical.mkdir()
+        shutil.copy2(MOD / "abettor/c0abethl.spl", canonical)
         for name in ("c0abets2.spl", "c0abethl.spl"):
             shutil.copy2(MOD / "abettor" / name, override / name)
         (override / "LUC0ABET.2DA").write_text(HLA_TABLE, encoding="ascii")
@@ -108,8 +121,7 @@ class Component2004ProducerTests(unittest.TestCase):
         )
 
     def test_a_preexisting_controller_keeps_its_id_and_is_restored_on_uninstall(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+        with disposable_game() as root:
             self.make_fixture(root, existing_projectile=558, snapshot=False)
             override = root / "override"
             (override / "GET_UNIQUE_FILENAME_SPL.IDS").write_text("IDS V1.0\n", encoding="ascii")
@@ -142,9 +154,98 @@ class Component2004ProducerTests(unittest.TestCase):
             for name, data in before.items():
                 self.assertEqual(data, after[name], name)
 
+    def test_missing_symphony_hla_is_restored_and_linked(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            resource(override, "C0ABETHL.SPL").unlink()
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Symphony of the Dark Children enabled", result.stdout)
+            hla_path = resource(override, "C0ABETHL.SPL")
+            name = struct.unpack_from("<I", hla_path.read_bytes(), 0x08)[0]
+            self.assertEqual("Symphony of the Dark Children", tlk_string(root / "dialog.tlk", name))
+            hla = parse_spl(hla_path)
+            controller = parse_spl(resource(override, "C0ABETS2.SPL"))
+            pulse = next(e.resource for e in controller.abilities[0].effects if e.opcode == 272)
+            self.assertEqual(1, len(hla.find_effects(opcode=251, resource="C0ABETS2")))
+            self.assertEqual(1, len(hla.find_effects(opcode=326, resource="C0BARDX")))
+            self.assertEqual(1, len(hla.find_effects(opcode=309, resource=pulse)))
+            hla_table = resource(override, "LUC0ABET.2DA").read_text().splitlines()
+            rows = [line.split() for line in hla_table if "AP_C0ABETHL" in line.split()]
+            self.assertEqual(1, len(rows))
+            self.assertIn("AP_C0ABETT5", rows[0])
+
+    def test_external_assignment_wraps_song_with_private_projectiles(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            with resource(override, "PROJECTL.IDS").open("a", encoding="ascii") as ids:
+                ids.write("480 INAREAPA\n481 INAREANP\n")
+                # Reserve the first private name in IDS alone to exercise allocation.
+                ids.write("482 C0P0\n")
+            enemy = resource(override, "INAREANP.PRO")
+            distinct_profile = bytearray(enemy.read_bytes())
+            struct.pack_into("<HH", distinct_profile, 0x204, 320, 320)
+            enemy.write_bytes(distinct_profile)
+            assignment = bytearray((MOD / "abettor/c0abethl.spl").read_bytes())
+            assignment = assignment.replace(b"C0ABETS2", b"xqsong\0\0")
+            (override / "XQASSIGN.SPL").write_bytes(assignment)
+            (override / "XQSONG.SPL").write_bytes((MOD / "abettor/c0abets2.spl").read_bytes())
+            original = resource(override, "XQSONG.SPL")
+            song = bytearray(original.read_bytes())
+            headers, count = struct.unpack_from("<IH", song, 0x64)
+            # The two projectile variants must keep their original profiles.
+            self.assertGreater(count, 0)
+            extra = song[headers:headers + 40]
+            effects = struct.unpack_from("<I", song, 0x6A)[0]
+            song[effects:effects] = extra
+            struct.pack_into("<H", song, 0x68, count + 1)
+            struct.pack_into("<I", song, 0x6A, effects + 40)
+            for i in range(count + 1):
+                struct.pack_into("<H", song, headers + i * 40 + 0x26, 481 if i == 0 else 482)
+            original.write_bytes(song)
+            combat = {path.name.upper(): path.read_bytes() for path in override.glob("*.PRO")}
+            before_effects = effect_records(original)
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            wrapper = parse_spl(original)
+            pulse = next(e.resource for e in wrapper.abilities[0].effects if e.opcode == 272)
+            payload = resource(override, pulse + ".SPL")
+            assign = parse_spl(resource(override, "XQASSIGN.SPL"))
+            self.assertEqual(1, len(assign.find_effects(opcode=251, resource="XQSONG")))
+            self.assertEqual(1, len(assign.find_effects(opcode=326, resource="C0BARDX")))
+            self.assertEqual(1, len(assign.find_effects(opcode=309, resource=pulse)))
+            self.assertEqual(before_effects, effect_records(payload))
+            self.assertEqual(pulse, read_eff_resource(resource(override, pulse + ".EFF")))
+            projectiles = {}
+            for line in resource(override, "PROJECTL.IDS").read_text().splitlines():
+                columns = line.split()
+                if len(columns) >= 2 and columns[0].isdigit():
+                    projectiles[int(columns[0]) + 1] = columns[1].upper()
+            self.assertTrue(resource(override, projectiles[wrapper.abilities[0].projectile] + ".PRO").read_bytes()[0x0C] & 0x40)
+            for ability, donor in zip(parse_spl(payload).abilities, ["INAREAPA"] + ["INAREANP"] * count, strict=True):
+                private = projectiles[ability.projectile]
+                self.assertNotIn(private, {"INAREAPA", "INAREANP", "C0P0"})
+                expected = bytearray(combat[donor + ".PRO"])
+                expected[0x0C] |= 0x40
+                self.assertEqual(expected, resource(override, private + ".PRO").read_bytes())
+            for file, data in combat.items():
+                self.assertEqual(data, resource(override, file).read_bytes())
+            undo = subprocess.run(
+                [str(WEIDU), "testmod/setup-test.tp2", "--no-auto-tp2", "--game", str(root),
+                 "--no-exit-pause", "--language", "0", "--force-uninstall-list", "2004"],
+                cwd=root, text=True, capture_output=True, timeout=60,
+            )
+            self.assertEqual(0, undo.returncode, undo.stdout + undo.stderr)
+            self.assertEqual(song, original.read_bytes())
+            self.assertEqual(assignment, resource(override, "XQASSIGN.SPL").read_bytes())
+            self.assertFalse(any(path.name.upper() in {"C0P1.PRO", "C0P2.PRO"} for path in override.iterdir()))
+
     def test_edited_stock_and_symphony_inputs_are_rewritten(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+        with disposable_game() as root:
             self.make_fixture(root, existing_projectile=1720, snapshot=False)
             override = root / "override"
             old_song = bytearray((MOD / "abettor/c0abets2.spl").read_bytes())
@@ -197,8 +298,7 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertIn("cannot be cast while wearing armor", tlk_string(root / "dialog.tlk", description))
 
     def test_iwd_stock_profiles_are_written_without_kit_components(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+        with disposable_game() as root:
             self.make_fixture(root, existing_projectile=520, snapshot=False)
             # WeiDU selects the IWD:EE branch via HOWPARTY.2DA in chitin.key.
             howparty = struct.pack("<8sHI", b"HOWPARTY", 0x3F4, 0)
@@ -242,8 +342,7 @@ class Component2004ProducerTests(unittest.TestCase):
         payloads: list[str] = []
         projectile_ids: list[int] = []
         for projectile_seed in (558, 1200):
-            with self.subTest(projectile_seed=projectile_seed), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
+            with self.subTest(projectile_seed=projectile_seed), disposable_game() as root:
                 self.make_fixture(root, existing_projectile=projectile_seed, reserve_payload_name=bool(payloads))
                 result = self.install(root)
                 output = result.stdout + result.stderr

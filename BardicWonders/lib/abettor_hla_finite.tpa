@@ -27,6 +27,12 @@ ACTION_IF FILE_EXISTS_IN_GAME ~LUC0ABET.2DA~ AND ~%symphony_payload%~ STRING_COM
       END
     END
 
+  INCLUDE ~%MOD_FOLDER%/lib/abettor_symphony.tpa~
+  COPY_EXISTING ~C0ABETHL.SPL~ ~override~
+    LPF c0bw_link_song_assignment
+      STR_VAR bardsong_name = ~C0ABETS2~ song_name = EVAL ~%symphony_payload%~
+    END
+
   COPY_EXISTING ~LUC0ABET.2DA~ ~override~
     LPF patch_remove_hla STR_VAR remove_ability = ~AP_C0ABETHL~ END
     LPF patch_add_hla STR_VAR 2da_row = ~C0ABET2~ ability = ~AP_C0ABETHL~
