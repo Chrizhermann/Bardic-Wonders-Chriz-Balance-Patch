@@ -147,13 +147,33 @@ DEFINE_ACTION_FUNCTION c0bw_wrap_external_songs BEGIN
   ACTION_PHP_EACH c0bw_assigned_songs AS assigned_song => unused BEGIN
     ACTION_IF !(VARIABLE_IS_SET $c0bw_owned_songs(~%assigned_song%~))
       AND FILE_EXISTS_IN_GAME ~%assigned_song%.SPL~ BEGIN
+      // Preserve the original external-song eligibility rules. Owned songs
+      // have already been written and never pass through this check.
       COPY_EXISTING ~%assigned_song%.SPL~ ~override~
-        SPRINT assigned_signature ~~
+        SET has_song_icon = 0
+        SET has_self_movement = 0
         PATCH_IF SOURCE_SIZE >= 0x72 BEGIN
           READ_ASCII 0 assigned_signature (8)
+          READ_BYTE 0x1C spell_type
+          PATCH_IF ~%assigned_signature%~ STRING_EQUAL_CASE ~SPL V1  ~ AND spell_type = 5 BEGIN
+            GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
+            PHP_EACH song_headers AS header_index => header BEGIN
+              GET_OFFSET_ARRAY2 header_effects header SPL_V10_HEAD_EFFECTS
+              PHP_EACH header_effects AS effect_index => effect BEGIN
+                READ_SHORT effect opcode
+                PATCH_IF opcode = 142 AND LONG_AT (effect + 0x08) = 40 BEGIN
+                  SET has_song_icon = 1
+                END
+                // The original check read the target and power as one word.
+                PATCH_IF opcode = 126 AND SHORT_AT (effect + 0x02) = 1 BEGIN
+                  SET has_self_movement = 1
+                END
+              END
+            END
+          END
         END
       BUT_ONLY
-      ACTION_IF ~%assigned_signature%~ STRING_EQUAL_CASE ~SPL V1  ~ BEGIN
+      ACTION_IF has_song_icon AND NOT has_self_movement BEGIN
         LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1
           STR_VAR bardsong_name = EVAL ~%assigned_song%~
         END
