@@ -96,6 +96,30 @@ def effect_assigned_song() -> tuple[bytes, bytes]:
     return bytes(spell), bytes(choose)
 
 
+def malformed_spell_inputs(source: bytes) -> tuple[dict[str, bytes], dict[str, bytes]]:
+    def replace(offset: int, layout: str, value: int) -> bytes:
+        damaged = bytearray(source)
+        struct.pack_into(layout, damaged, offset, value)
+        return bytes(damaged)
+
+    ability, = struct.unpack_from("<I", source, 0x64)
+    return (
+        {
+            "XQZERO.SPL": b"",
+            "XQTRUNC.SPL": b"SPL V1  ",
+            "XQSHORT.SPL": source[:0x71],
+            "XQFORMAT.SPL": b"SPL V2  " + source[8:],
+        },
+        {
+            "XQABIL.SPL": replace(0x64, "<I", len(source)),
+            "XQABFX.SPL": replace(ability + 0x20, "<H", 0xFFFF),
+            "XQGLFX.SPL": replace(0x70, "<H", 0xFFFF),
+            "XQOVRFL.SPL": replace(0x64, "<I", 0x7FFFFFFF),
+            "XQNEG.SPL": replace(0x6A, "<i", -1),
+        },
+    )
+
+
 class Component2004ProducerTests(unittest.TestCase):
     def make_fixture(self, root: Path, *, existing_projectile: int, reserve_payload_name: bool = False, snapshot: bool = True) -> None:
         override = root / "override"
@@ -304,6 +328,77 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertEqual(3, len(assigned.find_effects(opcode=309, resource=pulse)))
             payload = parse_spl(resource(override, pulse + ".SPL"))
             self.assertEqual(1, len(payload.find_effects(opcode=142, parameter2=0x00010028)))
+
+    def assert_damaged_inputs_are_isolated(self, damaged: dict[str, bytes], *, bad_donor: bool = False) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song = bytearray((MOD / "abettor/c0abets2.spl").read_bytes())
+            ability, = struct.unpack_from("<I", song, 0x64)
+            struct.pack_into("<H", song, ability + 0x26, 481)
+            (override / "XQSONG.SPL").write_bytes(song)
+            assignment = (MOD / "abettor/c0abethl.spl").read_bytes().replace(b"C0ABETS2", b"XQSONG\0\0")
+            (override / "XQASSIGN.SPL").write_bytes(assignment)
+            ids_file = resource(override, "PROJECTL.IDS")
+            with ids_file.open("a", encoding="ascii") as ids:
+                ids.write("480 INAREAPA\n481 XQBADPRO\n")
+            if bad_donor:
+                struct.pack_into("<H", song, ability + 0x26, 482)
+                for name in ("XQBAD1.SPL", "XQBAD2.SPL"):
+                    (override / name).write_bytes(song)
+            for name, data in damaged.items():
+                (override / name).write_bytes(data)
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            messages = [line.upper() for line in result.stdout.splitlines() if "skipping damaged" in line.lower()]
+            for name, data in damaged.items():
+                self.assertEqual(1, sum(name in line for line in messages), messages)
+                self.assertEqual(data, resource(override, name).read_bytes())
+            wrapper = parse_spl(resource(override, "XQSONG.SPL"))
+            pulse = next(e.resource for e in wrapper.abilities[0].effects if e.opcode == 272)
+            assigned = parse_spl(resource(override, "XQASSIGN.SPL"))
+            self.assertEqual(3, len(assigned.find_effects(opcode=309, resource=pulse)))
+            ids = {int(index) + 1: name.upper()
+                   for index, name, *_ in (line.split() for line in ids_file.read_text().splitlines())
+                   if index.isdigit()}
+            payload = parse_spl(resource(override, pulse + ".SPL"))
+            projectile = ids[payload.abilities[0].projectile]
+            self.assertNotEqual("INAREAPA", projectile)
+            self.assertTrue(resource(override, projectile + ".PRO").read_bytes()[0x0C] & 0x40)
+            if bad_donor:
+                for name in ("XQBAD1.SPL", "XQBAD2.SPL"):
+                    wrapped = parse_spl(resource(override, name))
+                    generated = next(e.resource for e in wrapped.abilities[0].effects if e.opcode == 272)
+                    payload = parse_spl(resource(override, generated + ".SPL"))
+                    self.assertEqual(482, payload.abilities[0].projectile)
+                self.assertEqual(1, sum(name.startswith("C0P") for name in ids.values()))
+
+    def test_short_and_wrong_signature_spells_are_skipped_once(self) -> None:
+        headers, _ = malformed_spell_inputs((MOD / "abettor/c0abets2.spl").read_bytes())
+        headers["SPCL542A.SPL"] = b"SPL V1  "
+        self.assert_damaged_inputs_are_isolated(headers)
+
+    def test_out_of_bounds_spell_tables_are_skipped_once(self) -> None:
+        _, tables = malformed_spell_inputs((MOD / "abettor/c0abets2.spl").read_bytes())
+        self.assert_damaged_inputs_are_isolated(tables)
+
+    def test_truncated_projectile_donor_is_skipped_once_across_songs(self) -> None:
+        self.assert_damaged_inputs_are_isolated({"XQBADPRO.PRO": b"PRO V1.0"}, bad_donor=True)
+
+    def test_truncated_symphony_eff_skips_finale_without_rolling_back_song_wrapping(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            (root / "testmod/bardsong/c0singin.eff").write_bytes(b"EFF V2.0")
+            override = root / "override"
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.upper().count("SKIPPING DAMAGED C0SINGIN.EFF"))
+            self.assertFalse(any(path.name.upper() in {"C0SINGIN.EFF", "C0ABIVS.EFF", "C0ABIVI.SPL"}
+                                 for path in override.iterdir()))
+            symphony = parse_spl(resource(override, "C0ABETS2.SPL"))
+            pulse = next(e.resource for e in symphony.abilities[0].effects if e.opcode == 272)
+            self.assertEqual(pulse, read_eff_resource(resource(override, pulse + ".EFF")))
 
     def test_external_song_is_discovered_when_assigned_only_through_an_eff(self) -> None:
         with disposable_game() as root:

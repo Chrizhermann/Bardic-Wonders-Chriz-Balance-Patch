@@ -1,6 +1,21 @@
 // Symphony is optional with the Abettor kit. Its controller and payload
 // were written by c0bw_wrap_song in this component.
+OUTER_SET symphony_templates_valid = 0
 ACTION_IF FILE_EXISTS_IN_GAME ~LUC0ABET.2DA~ AND ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
+  COPY ~%MOD_FOLDER%/bardsong/c0singin.spl~ ~override~
+    LPM c0bw_guard_spl
+    SET symphony_templates_valid = c0bw_valid
+  BUT_ONLY
+  COPY ~%MOD_FOLDER%/bardsong/c0singin.eff~ ~override~
+    LPM c0bw_guard_eff
+    SET symphony_templates_valid = symphony_templates_valid AND c0bw_valid
+  BUT_ONLY
+  COPY ~%MOD_FOLDER%/abettor/c0abethl.spl~ ~override~
+    LPM c0bw_guard_spl
+    SET symphony_templates_valid = symphony_templates_valid AND c0bw_valid
+  BUT_ONLY
+END
+ACTION_IF symphony_templates_valid BEGIN
   COPY ~%MOD_FOLDER%/bardsong/c0singin.spl~ ~override/C0ABIVI.SPL~
     LPF DELETE_EFFECT INT_VAR check_globals = 0 match_opcode = 139 END
     LPF DELETE_EFFECT INT_VAR check_globals = 0 match_opcode = 136 END
