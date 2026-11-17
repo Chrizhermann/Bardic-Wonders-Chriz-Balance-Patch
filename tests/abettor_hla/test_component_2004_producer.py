@@ -120,6 +120,28 @@ def malformed_spell_inputs(source: bytes) -> tuple[dict[str, bytes], dict[str, b
     )
 
 
+def song_loader_with_layout(ability_offset: int, effect_offset: int, effect_count: int = 0,
+                            first_effect: int = 0) -> bytes:
+    source = (MOD / "bardsong/c0bardx.spl").read_bytes()
+    original = struct.unpack_from("<I", source, 0x64)[0]
+    loader = bytearray(source[:0x72])
+    loader.extend(bytes(ability_offset - len(loader)))
+    loader.extend(source[original:original + 0x28])
+    if effect_count:
+        loader.extend(bytes(effect_count * 0x30))
+    struct.pack_into("<IHIHH", loader, 0x64, ability_offset, 1, effect_offset, 0, 0)
+    struct.pack_into("<HH", loader, ability_offset + 0x1E, effect_count, first_effect)
+    return bytes(loader)
+
+
+def empty_song_loader_with_casting_effect() -> bytes:
+    loader = bytearray(song_loader_with_layout(0x72, 0x9A, effect_count=1, first_effect=0xFFFF))
+    struct.pack_into("<H", loader, 0x70, 1)
+    struct.pack_into("<H", loader, 0x72 + 0x1E, 0)
+    struct.pack_into("<H", loader, 0x9A, 139)
+    return bytes(loader)
+
+
 class Component2004ProducerTests(unittest.TestCase):
     def make_fixture(self, root: Path, *, existing_projectile: int, reserve_payload_name: bool = False, snapshot: bool = True) -> None:
         override = root / "override"
@@ -439,6 +461,97 @@ class Component2004ProducerTests(unittest.TestCase):
                     private = ids[ability.projectile]
                     self.assertNotEqual("INAREAPA", private)
                     self.assertEqual(expected, resource(override, private + ".PRO").read_bytes())
+
+    def test_song_loader_rejects_bad_empty_pointers_and_overlapping_tables(self) -> None:
+        for name, data in (
+            ("empty invalid pointer", song_loader_with_layout(0x72, 0xFFFFFFFF)),
+            ("effect pointer in header", song_loader_with_layout(0x80, 0x70)),
+            ("empty effect table before ability", song_loader_with_layout(0x80, 0x72)),
+            ("overlapping tables", song_loader_with_layout(0x72, 0x72, 1)),
+        ):
+            with self.subTest(name=name), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                packaged = root / "testmod/bardsong/c0bardx.spl"
+                override = root / "override"
+                prior = packaged.read_bytes()
+                (override / "C0BARDX.SPL").write_bytes(prior)
+                packaged.write_bytes(data)
+                song = resource(override, "C0ABETS2.SPL")
+                original_song = song.read_bytes()
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(1, result.stdout.upper().count("SKIPPING DAMAGED C0BARDX.SPL"))
+                self.assertEqual(data, packaged.read_bytes())
+                self.assertEqual(prior, resource(override, "C0BARDX.SPL").read_bytes())
+                self.assertEqual(original_song, song.read_bytes())
+                self.assertFalse(any(path.name.upper() == "C0ABIVS.EFF" for path in override.iterdir()))
+
+    def test_song_loader_inserts_into_an_empty_effect_table_at_eof(self) -> None:
+        for label, data in (
+            ("empty at EOF", song_loader_with_layout(0x72, 0x9A)),
+            ("unused index", song_loader_with_layout(0x72, 0x9A, first_effect=0xFFFF)),
+            ("preserve casting effect", empty_song_loader_with_casting_effect()),
+        ):
+            with self.subTest(label=label), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                packaged = root / "testmod/bardsong/c0bardx.spl"
+                packaged.write_bytes(data)
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertNotIn("SKIPPING DAMAGED C0BARDX.SPL", result.stdout.upper())
+                override = root / "override"
+                song = parse_spl(resource(override, "C0ABETS2.SPL"))
+                pulse = next(e.resource for e in song.abilities[0].effects if e.opcode == 272)
+                installed = resource(override, "C0BARDX.SPL")
+                self.assertTrue(parse_spl(installed).find_effects(opcode=309, resource=pulse))
+                self.assertEqual(effect_records(packaged)[0], effect_records(installed)[0])
+
+    def test_projectile_donor_requires_all_type_specific_blocks(self) -> None:
+        source = (MOD / "bardsong/c0bardso.PRO").read_bytes()
+        for kind, size in ((3, 0x100), (3, 0x200), (2, 0x100), (0, 0x300), (99, 0x300)):
+            with self.subTest(kind=kind, size=size):
+                donor = bytearray(source[:size])
+                struct.pack_into("<H", donor, 0x08, kind)
+                self.assert_damaged_inputs_are_isolated({"XQBADPRO.PRO": bytes(donor)}, bad_donor=True)
+
+    def test_symphony_finale_rejects_bad_inner_eff_header_or_one_byte_truncation(self) -> None:
+        source = (MOD / "bardsong/c0singin.eff").read_bytes()
+        self.assertEqual(0x110, len(source))
+        for data in (source[:8] + b"NOT EFF!" + source[16:], source[:0x10F]):
+            with self.subTest(size=len(data)), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                (root / "testmod/bardsong/c0singin.eff").write_bytes(data)
+                override = root / "override"
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(1, result.stdout.upper().count("SKIPPING DAMAGED C0SINGIN.EFF"))
+                self.assertFalse(any(path.name.upper() in {"C0SINGIN.EFF", "C0ABIVS.EFF", "C0ABIVI.SPL"}
+                                     for path in override.iterdir()))
+                symphony = parse_spl(resource(override, "C0ABETS2.SPL"))
+                pulse = next(e.resource for e in symphony.abilities[0].effects if e.opcode == 272)
+                self.assertEqual(pulse, read_eff_resource(resource(override, pulse + ".EFF")))
+
+    def test_owned_eff_and_projectile_are_restored_from_valid_packaged_assets(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            for name, data in (
+                ("C0SINGIN.EFF", b"EFF V2.0NOT EFF!" + bytes(0x100)),
+                ("C0ABIVS.EFF", b"EFF V2.0NOT EFF!" + bytes(0x100)),
+                ("C0BARDSO.PRO", b"PRO V1.0"),
+                ("C0BWSPA.PRO", b"PRO V1.0"),
+            ):
+                (override / name).write_bytes(data)
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            canonical = (MOD / "bardsong/c0singin.eff").read_bytes()
+            self.assertEqual(canonical, resource(override, "C0SINGIN.EFF").read_bytes())
+            expected = canonical[:0x30] + b"C0ABIVI\0" + canonical[0x38:]
+            self.assertEqual(expected, resource(override, "C0ABIVS.EFF").read_bytes())
+            self.assertEqual((MOD / "bardsong/c0bardso.PRO").read_bytes(),
+                             resource(override, "C0BARDSO.PRO").read_bytes())
+            self.assertEqual((MOD / "bardsong/projectiles/C0BWSPA.PRO").read_bytes(),
+                             resource(override, "C0BWSPA.PRO").read_bytes())
 
     def test_external_assignment_preserves_legacy_exemptions(self) -> None:
         source = (MOD / "abettor/c0abets2.spl").read_bytes()

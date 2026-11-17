@@ -20,6 +20,7 @@ ACTION_IF symphony_templates_valid BEGIN
     LPF DELETE_EFFECT INT_VAR check_globals = 0 match_opcode = 139 END
     LPF DELETE_EFFECT INT_VAR check_globals = 0 match_opcode = 136 END
     LPF ALTER_SPELL_HEADER INT_VAR target = 5 range = 50 projectile = song_party_projectile END
+    LPF c0bw_prepare_effect_insertion END
     LPF ADD_SPELL_EFFECT INT_VAR opcode = 20 target = 2 timing = 0 duration = 6
       probability1 = 100 probability2 = 0
     END
@@ -28,6 +29,7 @@ ACTION_IF symphony_templates_valid BEGIN
     WRITE_ASCII 0x30 ~C0ABIVI~ (8)
 
   COPY_EXISTING ~C0ABETS2.SPL~ ~override~
+    LPF c0bw_prepare_effect_insertion END
     LPF ADD_SPELL_EFFECT INT_VAR opcode = 177 target = 9 parameter2 = 2 timing = 1
       probability1 = 100 probability2 = 0
       STR_VAR resource = ~C0ABIVS~

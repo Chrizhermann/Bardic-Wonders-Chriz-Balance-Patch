@@ -20,18 +20,45 @@ BEGIN
     READ_LONG 0x6A effect_table
     READ_SHORT 0x6E global_first
     READ_SHORT 0x70 global_count
-    // Counts and indices are unsigned words. Subtract the record spans so
-    // corrupt signed DWORD offsets cannot overflow an end-offset calculation.
-    SET c0bw_valid = (ability_count = 0 OR
-      (ability_table >= 0x72 AND ability_table <= SOURCE_SIZE - ability_count * 0x28))
-      AND (global_count = 0 OR
-      (effect_table >= 0x72 AND effect_table <= SOURCE_SIZE - (global_first + global_count) * 0x30))
-    FOR (i = 0; c0bw_valid AND i < ability_count; ++i) BEGIN
-      SET ability = ability_table + i * 0x28
-      READ_SHORT (ability + 0x1E) effect_count
-      READ_SHORT (ability + 0x20) first_effect
-      SET c0bw_valid = effect_count = 0 OR
-        (effect_table >= 0x72 AND effect_table <= SOURCE_SIZE - (first_effect + effect_count) * 0x30)
+    // Bounds matter even for empty tables. Counts and indices are unsigned
+    // words. Divide the remaining bytes before forming either table's end.
+    SET c0bw_valid = ability_table >= 0x72 AND ability_table <= SOURCE_SIZE
+      AND effect_table >= 0x72 AND effect_table <= SOURCE_SIZE
+    PATCH_IF c0bw_valid BEGIN
+      SET c0bw_valid = ability_count <= (SOURCE_SIZE - ability_table) / 0x28
+    END
+    PATCH_IF c0bw_valid BEGIN
+      // WeiDU 24900's effect insertion and deletion keep the ability offset
+      // fixed. They require effects after the abilities, even at an empty table.
+      SET c0bw_valid = ability_count = 0 OR effect_table >= ability_table + ability_count * 0x28
+    END
+    PATCH_IF c0bw_valid BEGIN
+      SET max_effect_end = 0
+      PATCH_IF global_count > 0 BEGIN
+        SET max_effect_end = global_first + global_count
+      END
+      FOR (i = 0; i < ability_count; ++i) BEGIN
+        SET ability = ability_table + i * 0x28
+        READ_SHORT (ability + 0x1E) effect_count
+        READ_SHORT (ability + 0x20) first_effect
+        PATCH_IF effect_count > 0 AND first_effect + effect_count > max_effect_end BEGIN
+          SET max_effect_end = first_effect + effect_count
+        END
+      END
+      SET c0bw_valid = max_effect_end <= (SOURCE_SIZE - effect_table) / 0x30
+    END
+  END
+END
+
+// A zero-count ability has no effect span. ADD_SPELL_EFFECT still uses its
+// index as an insertion point. Clamp out-of-file indices to the end of the
+// effect slots so insertion does not move existing casting effects.
+DEFINE_PATCH_FUNCTION c0bw_prepare_effect_insertion BEGIN
+  SET effect_slots = (BUFFER_LENGTH - LONG_AT 0x6A) / 0x30
+  GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
+  PHP_EACH song_headers AS header_index => header BEGIN
+    PATCH_IF SHORT_AT (header + 0x1E) = 0 AND SHORT_AT (header + 0x20) > effect_slots BEGIN
+      WRITE_SHORT (header + 0x20) effect_slots
     END
   END
 END
@@ -53,6 +80,22 @@ END
 
 DEFINE_PATCH_MACRO c0bw_guard_eff BEGIN
   LPF c0bw_has_header INT_VAR minimum_size = 0x110 STR_VAR signature = ~EFF V2.0~ RET c0bw_valid END
+  PATCH_IF c0bw_valid BEGIN
+    READ_ASCII 0x08 inner_signature (8)
+    SET c0bw_valid = ~%inner_signature%~ STRING_EQUAL_CASE ~EFF V2.0~
+  END
+  PATCH_IF NOT c0bw_valid BEGIN
+    LPM c0bw_record_damage
+  END
+END
+
+DEFINE_PATCH_MACRO c0bw_guard_projectile BEGIN
+  LPF c0bw_has_header INT_VAR minimum_size = 0x100 STR_VAR signature = ~PRO V1.0~ RET c0bw_valid END
+  PATCH_IF c0bw_valid BEGIN
+    READ_SHORT 0x08 projectile_type
+    SET c0bw_valid = projectile_type >= 1 AND projectile_type <= 3
+      AND SOURCE_SIZE >= projectile_type * 0x100
+  END
   PATCH_IF NOT c0bw_valid BEGIN
     LPM c0bw_record_damage
   END
@@ -106,10 +149,7 @@ BEGIN
         PATCH_IF FILE_EXISTS_IN_GAME ~%original_projectile%.PRO~ BEGIN
           INNER_ACTION BEGIN
             COPY_EXISTING ~%original_projectile%.PRO~ ~override~
-              LPF c0bw_has_header INT_VAR minimum_size = 0x100 STR_VAR signature = ~PRO V1.0~ RET c0bw_valid END
-              PATCH_IF NOT c0bw_valid BEGIN
-                LPM c0bw_record_damage
-              END
+              LPM c0bw_guard_projectile
             BUT_ONLY
             ACTION_IF c0bw_valid BEGIN
               OUTER_SPRINT private_projectile ~C0P%c0bw_projectile_serial%~
@@ -150,6 +190,7 @@ BEGIN
       SET source_song_valid = c0bw_valid
     BUT_ONLY
     COPY_EXISTING ~C0BARDX.SPL~ ~override~
+      LPF c0bw_prepare_effect_insertion END
       LPM c0bw_guard_spl
       SET source_song_valid = source_song_valid AND c0bw_valid
     BUT_ONLY

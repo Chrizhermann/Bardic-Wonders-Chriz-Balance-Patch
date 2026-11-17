@@ -32,8 +32,9 @@ END
 
 COPY ~%MOD_FOLDER%/bardsong/c0bardx.spl~ ~override~
   LPM c0bw_guard_spl
+  SET c0bw_song_loader_ready = c0bw_valid
 BUT_ONLY
-ACTION_IF c0bw_valid BEGIN
+ACTION_IF c0bw_song_loader_ready BEGIN
   COPY ~%MOD_FOLDER%/bardsong/c0bardx.spl~ ~override~
 END
 
@@ -156,19 +157,20 @@ END
 OUTER_SET $c0bw_owned_songs(C0ABETS2) = 1
 LAF c0bw_find_external_songs RET_ARRAY c0bw_eligible_songs c0bw_damaged_resources END
 
-ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
-  LAF c0bw_wrap_song INT_VAR payload_projectile = EVAL ~%profile%~
-    STR_VAR bardsong_name = EVAL ~%song%~
+ACTION_IF c0bw_song_loader_ready BEGIN
+  ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
+    LAF c0bw_wrap_song INT_VAR payload_projectile = EVAL ~%profile%~
+      STR_VAR bardsong_name = EVAL ~%song%~
+      RET_ARRAY c0bw_damaged_resources
+    END
+  END
+  LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile STR_VAR bardsong_name = ~C0ABETS2~
+    RET symphony_payload = song_name
     RET_ARRAY c0bw_damaged_resources
   END
+  INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
+  LAF c0bw_wrap_external_songs RET_ARRAY c0bw_damaged_resources END
 END
-LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile STR_VAR bardsong_name = ~C0ABETS2~
-  RET symphony_payload = song_name
-  RET_ARRAY c0bw_damaged_resources
-END
-
-INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
-LAF c0bw_wrap_external_songs RET_ARRAY c0bw_damaged_resources END
 ACTION_PHP_EACH c0bw_damaged_resources AS damaged_file => unused BEGIN
   PRINT ~Bardic Wonders #2004: skipping damaged %damaged_file%.~
 END
