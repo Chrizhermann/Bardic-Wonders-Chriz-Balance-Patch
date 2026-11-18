@@ -608,7 +608,7 @@ BEGIN
   END
 END
 
-// Called after the batch has an eligible native song or a validated wrapper.
+// Called for an eligible native batch or for the profiles of one validated wrapper.
 DEFINE_ACTION_FUNCTION c0bw_commit_core_projectiles BEGIN
   ACTION_PHP_EACH c0bw_core_bindings AS asset => projectile BEGIN
     OUTER_SPRINT resref $c0bw_resolved_projectiles(~%projectile%~)
@@ -1149,17 +1149,20 @@ END
 // Register known finite songs by resref. The source payload contributes its
 // effects. This component owns every payload projectile and the controller.
 DEFINE_ACTION_FUNCTION c0bw_wrap_song
-  INT_VAR payload_projectile = 1 preserve_projectiles = 0 templates_ready = 0 core_pending = 0
-  STR_VAR bardsong_name = "" controller_pulse = ""
-  RET song_name core_pending
+  INT_VAR payload_projectile = 1 preserve_projectiles = 0 templates_ready = 0 c0bardso = 0
+  STR_VAR bardsong_name = "" controller_pulse = "" stock_profile = ""
+  RET song_name c0bardso payload_projectile profiles_ready
   RET_ARRAY c0bw_damaged_resources
 BEGIN
   OUTER_SPRINT song_name ""
   OUTER_SET source_song_valid = 0
+  OUTER_SET profiles_ready = 1
+  OUTER_SET core_pending = 0
+  OUTER_SET controller_projectile = c0bardso
   ACTION_IF FILE_EXISTS_IN_GAME ~%bardsong_name%.SPL~ AND FILE_EXISTS_IN_GAME ~C0BARDX.SPL~ BEGIN
     COPY_EXISTING ~%bardsong_name%.SPL~ ~override~
       LPM c0bw_guard_spl
-      SET source_song_valid = c0bw_valid
+      SET source_song_valid = c0bw_valid AND SHORT_AT 0x68 > 0
     BUT_ONLY
     COPY_EXISTING ~C0BARDX.SPL~ ~override~
       LPM c0bw_guard_song_loader
@@ -1171,6 +1174,24 @@ BEGIN
     LAF c0bw_resolve_wrapper_templates RET templates_ready controller_pulse RET_ARRAY c0bw_damaged_resources END
   END
   ACTION_IF source_song_valid AND templates_ready BEGIN
+    // The loader can take this link. Stage only the profiles this song needs.
+    ACTION_IF NOT c0bardso OR NOT payload_projectile BEGIN
+      ACTION_IF NOT c0bardso BEGIN OUTER_SET $c0bw_batch_assets(C0BARDSO) = 1 END
+      ACTION_IF NOT payload_projectile BEGIN OUTER_SET $c0bw_batch_assets(~%stock_profile%~) = 1 END
+      LAF c0bw_plan_core_projectiles RET profiles_ready core_base core_end
+        RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
+          c0bw_resolved_projectiles c0bw_damaged_resources
+      END
+      ACTION_IF profiles_ready BEGIN
+        OUTER_SET core_pending = 1
+        ACTION_IF NOT c0bardso BEGIN OUTER_SET controller_projectile = $c0bw_core_bindings(C0BARDSO) END
+        ACTION_IF NOT payload_projectile AND VARIABLE_IS_SET $c0bw_core_bindings(~%stock_profile%~) BEGIN
+          OUTER_SET payload_projectile = $c0bw_core_bindings(~%stock_profile%~)
+        END
+      END
+    END
+  END
+  ACTION_IF source_song_valid AND templates_ready AND profiles_ready BEGIN
     OUTER_PATCH ~~ BEGIN
       LPF GET_UNIQUE_FILE_NAME STR_VAR extension = ~SPL~ base = EVAL ~%bardsong_name%~ RET song_name = filename END
       INNER_PATCH_SAVE song_name ~%song_name%~ BEGIN
@@ -1203,8 +1224,8 @@ BEGIN
     COPY_EXISTING - ~C0BARDSO.SPL~ ~.../c0bw-inlined/controller.spl~
       LPF c0bw_bind_controller_pulse STR_VAR controller_pulse pulse = EVAL ~%song_name%~ RET controller_ready = pulse_ready END
       SET controller_pro_ready = 0
-      PATCH_IF c0bardso >= 1 AND c0bardso <= 0xFFFF BEGIN
-        LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bardso END
+      PATCH_IF controller_projectile >= 1 AND controller_projectile <= 0xFFFF BEGIN
+        LPF ALTER_SPELL_HEADER INT_VAR projectile = controller_projectile END
         LPF c0bw_check_song_projectiles INT_VAR core_pending RET controller_pro_ready = projectiles_ready RET_ARRAY c0bw_damaged_resources END
       END
 
@@ -1237,8 +1258,8 @@ BEGIN
   ACTION_IF ~%song_name%~ STRING_COMPARE ~~ BEGIN
     ACTION_IF core_pending BEGIN
       LAF c0bw_commit_core_projectiles END
-      OUTER_SET core_pending = 0
     END
+    OUTER_SET c0bardso = controller_projectile
     COPY_EXISTING ~C0BARDX.SPL~ ~override~
       LPF c0bw_extend_song_effects
         STR_VAR resource = EVAL ~%song_name%~
@@ -1325,16 +1346,16 @@ BEGIN
 END
 
 DEFINE_ACTION_FUNCTION c0bw_wrap_external_songs
-  INT_VAR core_pending = 0
+  INT_VAR c0bardso = 0
   STR_VAR controller_pulse = ""
-  RET external_wrappers core_pending
+  RET external_wrappers
   RET_ARRAY c0bw_damaged_resources
 BEGIN
   OUTER_SET external_wrappers = 0
   ACTION_PHP_EACH c0bw_eligible_songs AS song => unused BEGIN
-    LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1 templates_ready = 1 core_pending
+    LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1 templates_ready = 1 c0bardso
       STR_VAR controller_pulse bardsong_name = EVAL ~%song%~
-      RET wrapped_song = song_name core_pending
+      RET wrapped_song = song_name c0bardso
       RET_ARRAY c0bw_damaged_resources
     END
     ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN

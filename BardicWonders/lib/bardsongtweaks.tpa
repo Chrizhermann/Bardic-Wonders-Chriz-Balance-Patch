@@ -114,85 +114,58 @@ OUTER_SET plan_attempted = loader_ready AND templates_ready AND support_ready
 OUTER_SET finite_ready = 0
 OUTER_SPRINT symphony_payload ""
 ACTION_IF plan_attempted BEGIN
-  ACTION_CLEAR_ARRAY c0bw_batch_assets
-  ACTION_CLEAR_ARRAY c0bw_native_profiles
-  ACTION_CLEAR_ARRAY c0bw_finite_targets
-  OUTER_SET has_finite_target = 0
+  ACTION_CLEAR_ARRAY c0bw_finite_profiles
+  OUTER_SET $c0bw_finite_profiles(1) = 1
   ACTION_IF iwd_stock_projectile > 0 BEGIN
-    OUTER_SET $c0bw_native_profiles(C0BWSPA) = iwd_stock_projectile
+    OUTER_SET $c0bw_finite_profiles(C0BWSPA) = iwd_stock_projectile
   END
   ACTION_IF iwd_enemy_projectile > 0 BEGIN
-    OUTER_SET $c0bw_native_profiles(C0BWSIW) = iwd_enemy_projectile
+    OUTER_SET $c0bw_finite_profiles(C0BWSIW) = iwd_enemy_projectile
   END
 
-  // Keep the owned set for discovery, but reserve only the profiles of
-  // owned spells with valid ability headers. Native bindings are already live.
+  OUTER_SET c0bardso = 0
+  OUTER_SET installed_wrappers = 0
+  OUTER_SET startup_ready = 1
   ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
-    ACTION_IF FILE_EXISTS_IN_GAME ~%song%.SPL~ BEGIN
-      COPY_EXISTING ~%song%.SPL~ ~override~
-        LPM c0bw_guard_spl
-        PATCH_IF c0bw_valid AND SHORT_AT 0x68 > 0 BEGIN
-          SPRINT $c0bw_finite_targets(~%song%~) ~%profile%~
-          SET has_finite_target = 1
-          PATCH_IF ~%profile%~ STRING_COMPARE ~1~ AND NOT VARIABLE_IS_SET $c0bw_native_profiles(~%profile%~) BEGIN
-            SET $c0bw_batch_assets(~%profile%~) = 1
-          END
-        END
-      BUT_ONLY
+    ACTION_IF startup_ready AND ~%song%~ STRING_COMPARE ~C0ABETS2~ BEGIN
+      OUTER_SET projectile = 0
+      ACTION_IF VARIABLE_IS_SET $c0bw_finite_profiles(~%profile%~) BEGIN
+        OUTER_SET projectile = $c0bw_finite_profiles(~%profile%~)
+      END
+      LAF c0bw_wrap_song INT_VAR payload_projectile = projectile templates_ready = 1 c0bardso
+        STR_VAR controller_pulse bardsong_name = EVAL ~%song%~ stock_profile = EVAL ~%profile%~
+        RET wrapped_song = song_name c0bardso projectile = payload_projectile profiles_ready
+        RET_ARRAY c0bw_damaged_resources
+      END
+      // Preserve the write-free startup when the first required stock
+      // projectiles cannot be allocated with the controller.
+      OUTER_SET startup_ready = c0bardso > 0 OR profiles_ready
+      ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN
+        OUTER_SET installed_wrappers += 1
+        OUTER_SET $c0bw_finite_profiles(~%profile%~) = projectile
+      END
     END
   END
-  ACTION_PHP_EACH c0bw_eligible_songs AS song => unused BEGIN
-    OUTER_SET has_finite_target = 1
-  END
-
-  ACTION_IF has_finite_target BEGIN
-    OUTER_SET $c0bw_batch_assets(C0BARDSO) = 1
-    LAF c0bw_plan_core_projectiles RET profiles_ready core_base core_end
-      RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
-        c0bw_resolved_projectiles c0bw_damaged_resources
+  ACTION_IF startup_ready BEGIN
+    OUTER_SET song_party_projectile = 0
+    ACTION_IF VARIABLE_IS_SET $c0bw_finite_profiles(C0BWSPA) BEGIN
+      OUTER_SET song_party_projectile = $c0bw_finite_profiles(C0BWSPA)
     END
-    ACTION_IF profiles_ready BEGIN
-      OUTER_SET core_pending = 1
-      OUTER_SET c0bardso = $c0bw_core_bindings(C0BARDSO)
-      OUTER_SET installed_wrappers = 0
-      OUTER_SET song_party_projectile = 0
-      ACTION_PHP_EACH c0bw_finite_targets AS song => profile BEGIN
-        OUTER_SET projectile = 0
-        ACTION_IF ~%profile%~ STRING_EQUAL ~1~ BEGIN
-          OUTER_SET projectile = 1
-        END ELSE ACTION_IF VARIABLE_IS_SET $c0bw_native_profiles(~%profile%~) BEGIN
-          OUTER_SET projectile = $c0bw_native_profiles(~%profile%~)
-        END ELSE ACTION_IF VARIABLE_IS_SET $c0bw_core_bindings(~%profile%~) BEGIN
-          OUTER_SET projectile = $c0bw_core_bindings(~%profile%~)
-        END
-        ACTION_IF ~%song%~ STRING_EQUAL ~C0ABETS2~ BEGIN
-          OUTER_SET song_party_projectile = projectile
-        END ELSE ACTION_IF projectile > 0 BEGIN
-          LAF c0bw_wrap_song INT_VAR payload_projectile = projectile templates_ready = 1 core_pending
-            STR_VAR controller_pulse bardsong_name = EVAL ~%song%~
-            RET wrapped_song = song_name core_pending
-            RET_ARRAY c0bw_damaged_resources
-          END
-          ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN
-            OUTER_SET installed_wrappers += 1
-          END
-        END
-      END
-      ACTION_IF song_party_projectile > 0 BEGIN
-        LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile templates_ready = 1 core_pending
-          STR_VAR controller_pulse bardsong_name = ~C0ABETS2~
-          RET symphony_payload = song_name core_pending
-          RET_ARRAY c0bw_damaged_resources
-        END
-        ACTION_IF ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
-          OUTER_SET installed_wrappers += 1
-        END
-      END
-      LAF c0bw_wrap_external_songs INT_VAR core_pending STR_VAR controller_pulse
+    LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile templates_ready = 1 c0bardso
+      STR_VAR controller_pulse bardsong_name = ~C0ABETS2~ stock_profile = ~C0BWSPA~
+      RET symphony_payload = song_name c0bardso song_party_projectile = payload_projectile profiles_ready
+      RET_ARRAY c0bw_damaged_resources
+    END
+    ACTION_IF ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
+      OUTER_SET installed_wrappers += 1
+    END
+    OUTER_SET external_wrappers = 0
+    ACTION_IF c0bardso > 0 OR profiles_ready BEGIN
+      LAF c0bw_wrap_external_songs INT_VAR c0bardso STR_VAR controller_pulse
         RET external_wrappers RET_ARRAY c0bw_damaged_resources
       END
-      OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
     END
+    OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
   END
 END
 INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~

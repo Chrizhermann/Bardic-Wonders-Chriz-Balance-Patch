@@ -818,6 +818,59 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertEqual(0xFFFF, struct.unpack_from("<H", loader.read_bytes(), 0x90)[0])
             self.assertEqual(pulse, parse_spl(loader).abilities[0].effects[-1].resource)
 
+    def test_loader_last_slot_does_not_register_skipped_stock_profile(self) -> None:
+        self.assert_last_stock_slot(aliased_profile="C0BWSNP")
+
+    def test_loader_last_slot_registers_only_the_wrapped_stock_profile(self) -> None:
+        self.assert_last_stock_slot(aliased_profile="C0BWSPA")
+
+    def assert_last_stock_slot(self, *, aliased_profile: str) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            resource(override, "C0ABETS2.SPL").unlink()
+            source = (MOD / "abettor/c0abets2.spl").read_bytes()
+            party_song = override / "SPCL542A.SPL"
+            narrow_song = override / "SPCL751A.SPL"
+            party_song.write_bytes(source)
+            narrow_song.write_bytes(source)
+            (root / "testmod/bardsong/c0bardx.spl").write_bytes(
+                song_loader_with_layout(0x72, 0x9A, effect_count=0xFFFE)
+            )
+            party_conflict = aliased_profile == "C0BWSPA"
+            foreign_id = 522 if party_conflict else 523
+            ids, missiles = self.seed_projectile_registry(
+                override, f"{foreign_id} XQFOREIGN\r\n65533 XQHIGH\r\n".encode("ascii"), b"65534 XQHIGH\r\n",
+            )
+            before_ids, before_missiles = ids.read_bytes(), missiles.read_bytes()
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.count("skipping C0BARDX.SPL at the 65535-effect capacity limit"))
+            self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+            wrapper = parse_spl(party_song)
+            self.assertEqual({522}, {ability.projectile for ability in wrapper.abilities})
+            pulse = wrapper.find_effects(opcode=272)[0].resource
+            self.assertEqual(pulse, read_eff_resource(resource(override, pulse + ".EFF")))
+            payload = parse_spl(resource(override, pulse + ".SPL"))
+            self.assertEqual({65535 if party_conflict else 523}, {a.projectile for a in payload.abilities})
+            profile = "C0P0" if party_conflict else "C0BWSPA"
+            self.assertTrue(resource(override, profile + ".PRO").read_bytes()[0x0C] & 0x40)
+            loader = parse_spl(resource(override, "C0BARDX.SPL")).abilities[0].effects
+            self.assertEqual(0xFFFF, len(loader))
+            self.assertEqual((309, pulse), (loader[-1].opcode, loader[-1].resource))
+            self.assertEqual(source, narrow_song.read_bytes())
+            self.assertFalse((override / "C0BWSNP.PRO").exists())
+            private = sorted(path.name.upper() for path in override.glob("C0P*.PRO"))
+            if party_conflict:
+                self.assertEqual(["C0P0.PRO"], private)
+                self.assertEqual(before_ids.splitlines() + [b"65534 C0P0"], ids.read_bytes().splitlines())
+                self.assertEqual(before_missiles.splitlines() + [b"65535 C0P0"], missiles.read_bytes().splitlines())
+            else:
+                self.assertFalse(private)
+                self.assertEqual(before_ids, ids.read_bytes())
+                self.assertEqual(before_missiles, missiles.read_bytes())
+
     def test_compound_assignments_match_legacy_global_and_ability_traversal(self) -> None:
         def opcodes(records):
             return tuple(struct.unpack_from("<H", record)[0] for record in records)
@@ -1247,6 +1300,7 @@ class Component2004ProducerTests(unittest.TestCase):
             missile.write_bytes(b"IDS V1.0\r\n525 Taken label\r\n523 Last label\r\n")
             (override / "FIREBALL.IDS").write_bytes(b"IDS V1.0\r\n0 NONE\r\n")
             self.seed_external_song_and_bard_text(override)
+            shutil.copyfile(MOD / "abettor/c0abets2.spl", override / "SPCL542A.SPL")
             shutil.copyfile(MOD / "abettor/c0abets2.spl", override / "SPCL751A.SPL")
             result = self.install(root)
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
