@@ -208,3 +208,11 @@ SAY UNIDENTIFIED_DESC ~Drums of Raijin
 This is a powerful aid to the Storm Drummer. This song gives the Storm Drummer a 75% chance to call down bolts of lightning dealing 6d10 electrical damage to all nearby enemies. Additionally, the Storm Drummer is immune to electrical damage and is surrounded by a magical shroud which provides +10 to Armor Class, immunity to normal weapons and deals 2d8+5 damage to anyone who attacks the Storm Drummer in melee range.
 
 This ability replaces the current Bard Song.~
+
+
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSNP~ RET song_projectile = projectile END
+ACTION_FOR_EACH song IN C0SDRUSO C0SDRUS2 BEGIN
+  COPY_EXISTING ~%song%.SPL~ ~override~
+    LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+END

@@ -160,6 +160,7 @@ This ability replaces the current Bard Song.~
 
 ADD_PROJECTILE ~%MOD_FOLDER%/darkbloom/C0BDD#1.PRO~ ~Dark Entanglement~
 ADD_PROJECTILE ~%MOD_FOLDER%/darkbloom/C0BDD#SO.PRO~ ~Bard Song Ignore Caster~
+COPY ~%MOD_FOLDER%/darkbloom/C0BDD#SO.PRO~ ~override~
 COPY ~%MOD_FOLDER%/darkbloom/C0BDD#SO.spl~ ~override~
 READ_LONG 0x64 "abil_off"
 READ_SHORT 0x68 "abil_num"
@@ -401,3 +402,11 @@ END
 // some of them, and every game language has its own names.
 ACTION_DEFINE_ARRAY c0_bdd_kit_spells BEGIN C0BDDS1 C0BDDS2 C0BDDS3 C0BDDS4 C0BDDS5 C0BDDS6 C0BDDS7 END
 LAF C0_BW_NAME_KIT_SPELLS INT_VAR description = c0_bdd_help STR_VAR spells = c0_bdd_kit_spells END
+
+
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSNP~ RET song_projectile = projectile END
+ACTION_FOR_EACH song IN C0BDD#S2 BEGIN
+  COPY_EXISTING ~%song%.SPL~ ~override~
+    LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+END

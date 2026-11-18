@@ -21,6 +21,15 @@ warning at line 4573; installed-with-warnings at line 4621. Its SHA256 is
 `eb3d40b1bcd3d4a77e775dfd8d829fb82d0f595e4aaddc6aa45ef01c34c908d5`.
 The overwritten root `SETUP-BARDICWONDERS.DEBUG` is not evidence for this failure.
 
+## Save and rest fix in v2.9c-balance.9
+
+Component 2004 now resolves the finite Symphony and its repeating pulse
+before linking the HLA and granting it. If only the optional invisibility
+cue is unavailable, Symphony keeps its grant and payload, and its description
+omits the opening and finale Invisibility. Its repeating pulse uses a
+save-compatible projectile. The standalone tail remains at 1.2.0. See the
+[balance.9 release notes](releases/v2.9c-balance.9.md) for verification.
+
 ## Exact mismatch
 
 The first failing gate in `v2.9c-balance.3` was

@@ -129,6 +129,10 @@ class SourceInstallerContractTests(unittest.TestCase):
         self.assertIsNone(direct_hla_row.search(self.text))
 
     def test_description_matches_the_approved_mechanics(self) -> None:
+        include = "INCLUDE ~%MOD_FOLDER%/lib/abettor_symphony.tpa~"
+        self.assertIn(include, self.text)
+        canonical = ABETTOR_TPA.with_name("abettor_symphony.tpa").read_text(encoding="utf-8")
+        source = self.text.replace(include, canonical)
         for phrase in (
             "+70% to all thieving skills",
             "+3 bonus to Armor Class",
@@ -137,7 +141,7 @@ class SourceInstallerContractTests(unittest.TestCase):
             "one round when the song ends",
         ):
             with self.subTest(phrase=phrase):
-                self.assertIn(phrase, self.text)
+                self.assertIn(phrase, source)
 
         for removed_phrase in (
             "+6 to Luck",
@@ -145,7 +149,7 @@ class SourceInstallerContractTests(unittest.TestCase):
             "chance to stop time",
         ):
             with self.subTest(removed_phrase=removed_phrase):
-                self.assertNotIn(removed_phrase, self.text)
+                self.assertNotIn(removed_phrase, source)
 
 
 if __name__ == "__main__":

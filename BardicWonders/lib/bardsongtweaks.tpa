@@ -1,200 +1,237 @@
-ADD_PROJECTILE ~%MOD_FOLDER%/bardsong/c0bardso.PRO~ ~C0 Bardsong~
+INCLUDE ~%MOD_FOLDER%/lib/bardsong_registration.tpa~
+ACTION_CLEAR_ARRAY c0bw_damaged_resources
 
-COPY_EXISTING ~KITLIST.2DA~ ~override~
-  READ_2DA_ENTRIES_NOW ~fig_kitlist~ 10
-  FOR (row = 1; row < fig_kitlist; row += 1) BEGIN
-  READ_2DA_ENTRY_FORMER ~fig_kitlist~ row 5 kit_clab
-  READ_2DA_ENTRY_FORMER ~fig_kitlist~ row 1 kit_label
-  READ_2DA_ENTRY_FORMER ~fig_kitlist~ row 8 kit_class
-  
-  PATCH_IF (%kit_class% = 5) BEGIN
-    PATCH_IF FILE_EXISTS_IN_GAME ~%kit_clab%.2da~ BEGIN
-      INNER_ACTION BEGIN
-      COPY_EXISTING ~%kit_clab%.2DA~ override
-        LPF set_clab_2da_entries INT_VAR f_MinLevel = 1 f_MaxLevel = 1 STR_VAR f_Entry = AP_C0BARDX END
-        PRETTY_PRINT_2DA
+LAF c0bw_resolve_core_asset INT_VAR asset_type = 1
+  STR_VAR asset = ~C0BARDX~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardx.spl~
+  RET loader_ready = ready RET_ARRAY c0bw_damaged_resources
+END
+LAF c0bw_resolve_wrapper_templates RET templates_ready templates_rejected controller_pulse RET_ARRAY c0bw_damaged_resources END
+ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_song_messages BEGIN
+  c0bardsx => ~Bard Song Ready~
+  c0singin => ~Singing Bard Song~
+END
+OUTER_SET support_ready = 1
+ACTION_PHP_EACH c0bw_song_messages AS spell => message BEGIN
+  LAF c0bw_resolve_core_asset
+    STR_VAR asset = EVAL ~%spell%~ packaged = EVAL ~%MOD_FOLDER%/bardsong/%spell%.spl~
+    RET support_spell_ready = ready RET_ARRAY c0bw_damaged_resources
+  END
+  OUTER_SET support_ready = support_ready AND support_spell_ready
+  ACTION_IF support_spell_ready BEGIN
+    COPY_EXISTING ~%spell%.SPL~ ~override~
+      LPF c0bw_alter_song_effects INT_VAR match_opcode = 139 parameter1 = RESOLVE_STR_REF (~%message%~) END
+    BUT_ONLY
   END
 END
-END
-END
-
-ACTION_FOR_EACH invisible_area IN INAREANP INAREA INAREASM BIGNAREA INAREAPA BEGIN
-    COPY_EXISTING ~%invisible_area%.pro~ ~OVERRIDE~
-     WRITE_BYTE 0x21a 0
-  END
-
-COPY ~%MOD_FOLDER%/bardsong/c0bardx.spl~ OVERRIDE
-COPY ~%MOD_FOLDER%/bardsong/c0bardsx.spl~ OVERRIDE
-  LPF ALTER_EFFECT INT_VAR match_opcode = 139 parameter1 = RESOLVE_STR_REF (~Bard Song Ready~) END
 COPY ~%MOD_FOLDER%/bardsong/c0brdef1.bam~ OVERRIDE
 COPY ~%MOD_FOLDER%/bardsong/c0brdef1.vvc~ OVERRIDE
 COPY ~%MOD_FOLDER%/bardsong/c0bardso.wav~ OVERRIDE
-COPY ~%MOD_FOLDER%/bardsong/c0singin.eff~ OVERRIDE
-COPY ~%MOD_FOLDER%/bardsong/c0singin.spl~ OVERRIDE
-  LPF ALTER_EFFECT INT_VAR match_opcode = 139 parameter1 = RESOLVE_STR_REF (~Singing Bard Song~) END
-COPY ~%MOD_FOLDER%/bardsong/c0singi2.eff~ OVERRIDE
-COPY ~%MOD_FOLDER%/bardsong/c0singi2.spl~ OVERRIDE
-COPY ~%MOD_FOLDER%/bardsong/c0singi2.spl~ OVERRIDE
+// C0SINGI2 suppresses stock delivery while the wrapper is active.
+LAF c0bw_resolve_core_asset INT_VAR asset_type = 2 required_eff_opcode = 326
+  STR_VAR asset = ~C0SINGI2~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0singi2.EFF~
+  RET suppression_ready = ready RET_ARRAY c0bw_damaged_resources
+END
+OUTER_SET support_ready = support_ready AND suppression_ready
+// C0SINGIN's effect provides presentation and the optional Symphony finale.
+LAF c0bw_resolve_core_asset INT_VAR asset_type = 2 required_eff_opcode = 326
+  STR_VAR asset = ~C0SINGIN~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0singin.EFF~
+  RET singing_eff_ready = ready RET_ARRAY c0bw_damaged_resources
+END
+LAF c0bw_resolve_core_asset
+  STR_VAR asset = ~C0SINGI2~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0singi2.spl~
+  RET support_spell_ready = ready RET_ARRAY c0bw_damaged_resources
+END
+OUTER_SET support_ready = support_ready AND support_spell_ready
 
 ACTION_IF FILE_EXISTS_IN_GAME ~C0BWHL8.spl~ THEN BEGIN
-COPY_EXISTING ~C0BWHL3.SPL~ ~OVERRIDE~
-WRITE_BYTE 0x1c 5
-COPY_EXISTING ~C0BWHL4.SPL~ ~OVERRIDE~
-WRITE_BYTE 0x1c 5
-COPY_EXISTING ~C0BWHL5.SPL~ ~OVERRIDE~
-WRITE_BYTE 0x1c 5
-COPY_EXISTING ~C0BWHL8.SPL~ ~OVERRIDE~
-LPF ALTER_EFFECT INT_VAR match_opcode = 99 parameter1 = 130 END
+  ACTION_FOR_EACH song IN C0BWHL3 C0BWHL4 C0BWHL5 BEGIN
+    COPY_EXISTING ~%song%.SPL~ ~override~
+      LPM c0bw_guard_spl
+      PATCH_IF c0bw_valid BEGIN WRITE_BYTE 0x1c 5 END
+    BUT_ONLY
+  END
+  COPY_EXISTING ~C0BWHL8.SPL~ ~override~
+    LPM c0bw_guard_spl
+    PATCH_IF c0bw_valid BEGIN
+      LPF c0bw_alter_song_effects INT_VAR match_opcode = 99 parameter1 = 130 END
+    END
+  BUT_ONLY
 END
 
-COPY_EXISTING_REGEXP GLOB ~.*\.spl~ ~override~
-  PATCH_IF (BUFFER_LENGTH > 0x71) THEN BEGIN
-  SPRINT bardsong_name ~%SOURCE_RES%~
-  SET patch_bard_song = 0
-  SET no_patch = 0
-  READ_BYTE 0x1c spell_type
-    READ_LONG  0x64 ___#abil_off
-    READ_SHORT 0x68 ___#abil_num
-    READ_LONG  0x6a ___#fx_off
-				 FOR (___#index1 = 0 ; ___#index1 < ___#abil_num ; ___#index1 = ___#index1 + 1) BEGIN
-				READ_SHORT (___#abil_off + 0x1e + (0x28 * ___#index1)) ___#abil_fx_num
-        READ_SHORT (___#abil_off + 0x20 + (0x28 * ___#index1)) ___#abil_fx_idx
-          FOR (___#index2 = ___#abil_fx_idx ; ___#index2 < (___#abil_fx_idx + ___#abil_fx_num) ; ___#index2 = ___#index2 + 1) BEGIN
-            READ_SHORT (___#fx_off + 0x30 * ___#index2) ___#opcode
-            READ_SHORT (___#fx_off + 0x30 * ___#index2 + 0x02) ___#target
-            READ_SHORT (___#fx_off + 0x30 * ___#index2 + 0x08) ___#param2
-            
-	  PATCH_IF  (spell_type = 5) AND ((___#opcode = 126) AND (___#target = 1)) AND !(patch_bard_song = 1) BEGIN
-              SET no_patch = 1
-              SET patch_bard_song = 1
-            END
-    END
-    END
-    END
-		FOR (___#index1 = 0 ; ___#index1 < ___#abil_num ; ___#index1 = ___#index1 + 1) BEGIN
-				READ_SHORT (___#abil_off + 0x1e + (0x28 * ___#index1)) ___#abil_fx_num
-        READ_SHORT (___#abil_off + 0x20 + (0x28 * ___#index1)) ___#abil_fx_idx
-          FOR (___#index2 = ___#abil_fx_idx ; ___#index2 < (___#abil_fx_idx + ___#abil_fx_num) ; ___#index2 = ___#index2 + 1) BEGIN
-            READ_SHORT (___#fx_off + 0x30 * ___#index2) ___#opcode
-            READ_SHORT (___#fx_off + 0x30 * ___#index2 + 0x02) ___#target
-            READ_SHORT (___#fx_off + 0x30 * ___#index2 + 0x08) ___#param2
-            
-	  PATCH_IF  (spell_type = 5) AND ((___#opcode = 142) AND (___#param2 = 40)) AND !(patch_bard_song = 1) AND !(no_patch = 1) BEGIN
-            INNER_ACTION BEGIN
-            PRINT ~%bardsong_name% is a bard song.~
-            END
-              SET patch_bard_song = 1
+OUTER_SET iwd_modal_present = 0
+OUTER_SET iwd_stock_projectile = 0
+OUTER_SET iwd_enemy_projectile = 0
+OUTER_SET iwd_jester_wrapper = 0
+ACTION_IF GAME_IS ~iwdee~ BEGIN
+  OUTER_SET iwd_jester_wrapper = MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~1002~
+  LAF c0bw_patch_iwd_modal_songs INT_VAR iwd_jester_wrapper
+    RET iwd_modal_present iwd_stock_projectile iwd_enemy_projectile
+    RET_ARRAY c0bw_damaged_resources
+  END
+END
 
-    LPF GET_UNIQUE_FILE_NAME STR_VAR extension = "SPL" base = EVAL "%bardsong_name%" RET song_name = filename END
-    INNER_PATCH_SAVE song_name "%song_name%" BEGIN REPLACE_TEXTUALLY CASE_INSENSITIVE EXACT_MATCH ~__~ ~C0BW~ END
+ACTION_CLEAR_ARRAY c0bw_owned_songs
+ACTION_CLEAR_ARRAY c0bw_owned_finite_songs
+ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN
+  FJBARDA => C0BWSPA
+  FJBLADEB => C0BWSPA
+  FJBARDB => 1
+  C0ABETSO => C0BWSPA
+  C0KM#SO => C0BWSPA
+  C0KM#SOH => C0BWSPA
+  C0SKD02A => C0BWSPA
+  C0TRBSO => C0BWSPA
+  C0TRBSO2 => C0BWSPA
+  C0DESP7 => 1
+  C0DESP9 => 1
+  C0BDD#S2 => C0BWSNP
+  C0JES03A => C0BWSNP
+  C0SDRUS2 => C0BWSNP
+  C0SDRUSO => C0BWSNP
+END
+ACTION_IF NOT GAME_IS ~iwdee~ BEGIN
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN
+    SPCL542A => C0BWSPA
+    SPCL920A => C0BWSPA
+    SPCL751A => C0BWSNP
+  END
+END ELSE BEGIN
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN FJBARDB => C0BWSPA END
+  ACTION_IF iwd_jester_wrapper BEGIN
+    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN SPCL751A => C0BWSIW END
+  END
+END
+ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN
+  C0BDD#SO => C0BDD#SO
+  C0ABETS2 => C0BWSPA
+END
+ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
+  OUTER_SET $c0bw_owned_songs(~%song%~) = 1
+END
+LAF c0bw_find_external_songs RET_ARRAY c0bw_eligible_songs c0bw_damaged_resources END
 
-    INNER_ACTION BEGIN
+OUTER_SET plan_attempted = loader_ready AND templates_ready AND support_ready
+OUTER_SET startup_ready = 0
+ACTION_IF plan_attempted BEGIN
+  // Check only the shared controller here. Its PRO and ID remain staged
+  // until a song can commit them together with its own payload delivery.
+  LAF c0bw_plan_core_projectiles INT_VAR controller_only = 1
+    RET startup_ready = profiles_ready RET_ARRAY c0bw_damaged_resources
+  END
+END
+OUTER_SET finite_ready = 0
+OUTER_SPRINT symphony_payload ""
+ACTION_IF startup_ready BEGIN
+  ACTION_CLEAR_ARRAY c0bw_finite_profiles
+  OUTER_SET $c0bw_finite_profiles(1) = 1
+  ACTION_IF iwd_stock_projectile > 0 BEGIN
+    OUTER_SET $c0bw_finite_profiles(C0BWSPA) = iwd_stock_projectile
+  END
+  ACTION_IF iwd_enemy_projectile > 0 BEGIN
+    OUTER_SET $c0bw_finite_profiles(C0BWSIW) = iwd_enemy_projectile
+  END
 
-    COPY_EXISTING ~C0BARDX.SPL~ ~OVERRIDE~
-      LPF ADD_SPELL_EFFECT INT_VAR opcode = 309 target = 1 parameter1 = 0 parameter2 = 0 timing = 1 STR_VAR resource = EVAL ~%song_name%~
+  OUTER_SET c0bardso = 0
+  OUTER_SET installed_wrappers = 0
+  ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
+    ACTION_IF ~%song%~ STRING_COMPARE ~C0ABETS2~ BEGIN
+      OUTER_SET projectile = 0
+      ACTION_IF VARIABLE_IS_SET $c0bw_finite_profiles(~%profile%~) BEGIN
+        OUTER_SET projectile = $c0bw_finite_profiles(~%profile%~)
       END
-    
-    COPY_EXISTING_REGEXP GLOB ~.*\.spl~ ~override~
-    READ_LONG  0x64 ___#abil_off
-    READ_SHORT 0x68 ___#abil_num
-    READ_LONG  0x6a ___#fx_off
-    SET patch_bard_song_set = 0
-				 FOR (___#index1 = 0 ; ___#index1 < ___#abil_num ; ___#index1 = ___#index1 + 1) BEGIN
-				READ_SHORT (___#abil_off + 0x1e + (0x28 * ___#index1)) ___#abil_fx_num
-        READ_SHORT (___#abil_off + 0x20 + (0x28 * ___#index1)) ___#abil_fx_idx
-          FOR (___#index2 = ___#abil_fx_idx ; ___#index2 < (___#abil_fx_idx + ___#abil_fx_num) ; ___#index2 = ___#index2 + 1) BEGIN
-            READ_SHORT (___#fx_off + 0x30 * ___#index2) ___#opcode
-            READ_SHORT (___#fx_off + 0x30 * ___#index2 + 0x02) ___#target
-            READ_SHORT (___#fx_off + 0x30 * ___#index2 + 0x08) ___#param2
-	      PATCH_IF  (___#opcode = 251) BEGIN
-    LPF CLONE_EFFECT INT_VAR silent = 1 match_opcode = 251 opcode = 326 target = 2 parameter2 = 0 parameter1 = 0 timing = 1 STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~C0BARDX~ END
-    LPF CLONE_EFFECT INT_VAR silent = 1 match_opcode = 251 opcode = 309 target = 2 parameter2 = 0 parameter1 = 1 timing = 4 duration = 1 STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~ END
-              SET patch_bard_song_set = 1
-    END
-    END
-    END
-    BUT_ONLY
-
-    COPY_EXISTING ~%bardsong_name%.spl~ ~override/%song_name%.spl~
-    LPF ALTER_EFFECT INT_VAR silent = 1 STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~ END
-    COPY ~%MOD_FOLDER%/bardsong/c0bardso.spl~ ~OVERRIDE/%bardsong_name%.SPL~
-    LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bardso END
-    LPF ALTER_EFFECT INT_VAR silent = 1 STR_VAR match_resource = BARDSONG resource = EVAL ~%song_name%~ END
-
-    COPY ~%MOD_FOLDER%/bardsong/c0bardso.eff~ ~OVERRIDE/%song_name%.EFF~
-    WRITE_ASCIIE 0x30 ~%song_name%~
-
-    ACTION_FOR_EACH baldur_script IN baldur bdbaldur baldur25 BEGIN
-      ACTION_IF FILE_EXISTS_IN_GAME ~%baldur_script%.bcs~ BEGIN
-      EXTEND_TOP ~%baldur_script%.bcs~ ~%MOD_FOLDER%/bardsong/script/baldur.baf~ EVAL
+      LAF c0bw_wrap_song INT_VAR payload_projectile = projectile templates_ready = 1 c0bardso
+        STR_VAR controller_pulse bardsong_name = EVAL ~%song%~ stock_profile = EVAL ~%profile%~
+        RET wrapped_song = song_name c0bardso projectile = payload_projectile
+        RET_ARRAY c0bw_damaged_resources
+      END
+      ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN
+        OUTER_SET installed_wrappers += 1
+        OUTER_SET $c0bw_finite_profiles(~%profile%~) = projectile
       END
     END
-
-    END
-    END
-    END
-    END
-    BUT_ONLY
-
+  END
+  OUTER_SET song_party_projectile = 0
+  ACTION_IF VARIABLE_IS_SET $c0bw_finite_profiles(C0BWSPA) BEGIN
+    OUTER_SET song_party_projectile = $c0bw_finite_profiles(C0BWSPA)
+  END
+  LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile templates_ready = 1 c0bardso
+    STR_VAR controller_pulse bardsong_name = ~C0ABETS2~ stock_profile = ~C0BWSPA~
+    RET symphony_payload = song_name c0bardso song_party_projectile = payload_projectile
+    RET_ARRAY c0bw_damaged_resources
+  END
+  ACTION_IF ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
+    OUTER_SET installed_wrappers += 1
+  END
+  LAF c0bw_wrap_external_songs INT_VAR c0bardso STR_VAR controller_pulse
+    RET external_wrappers RET_ARRAY c0bw_damaged_resources
+  END
+  OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
+END
 INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
 
-///////////////////////////////////////////////////////////////////////////
-// Update Kit Descriptions                                               //
-///////////////////////////////////////////////////////////////////////////
-ACTION_FOR_EACH description IN 
-    clastext  
-  BEGIN
-    ACTION_IF FILE_EXISTS_IN_GAME ~%description%.2da~ BEGIN
-      COPY_EXISTING ~%description%.2DA~ ~override~
-      COUNT_2DA_COLS col_count
-      COUNT_2DA_ROWS col_count rows
-      FOR (index = 0; index < rows; ++index) BEGIN
-        READ_2DA_ENTRY index 0 col_count row_name
-//bard
+ACTION_CLEAR_ARRAY c0bw_bard_clabs
+ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_bard_clabs BEGIN CLABBA01 => 1 END
+COPY_EXISTING ~KITLIST.2DA~ ~override~
+  READ_2DA_ENTRIES_NOW kit_rows 10
+  FOR (row = 1; row < kit_rows; ++row) BEGIN
+    READ_2DA_ENTRY_FORMER kit_rows row 8 kit_class
+    PATCH_IF kit_class = 5 BEGIN
+      READ_2DA_ENTRY_FORMER kit_rows row 5 kit_clab
+      TO_UPPER kit_clab
+      SET $c0bw_bard_clabs(~%kit_clab%~) = 1
+    END
+  END
+BUT_ONLY
 
-        PATCH_IF "%row_name%" STRING_EQUAL_CASE "BARD" BEGIN
-          READ_2DA_ENTRY index 4 col_count kit_desc
-          SPRINT old_BARD_eff ~While active, the Bard Song has the following effects:
-  Restore morale to its average value
-  Remove Fear
-  Protection From Fear~
-          SPRINT new_BARD_eff ~While active, the Bard Song has the following effects, improving with level:
-  1st level: +1 Luck, immunity to fear and morale failure
-  15th level: +2 Luck, immunity to fear and morale failure
-  20th level: +3 Luck, immunity to fear and morale failure
-~
-          SPRINT old_BARD ~– May use Bard Song ability.~
-          SPRINT new_BARD ~BARD SONG: The Bard's Song may be used an unlimited number of times, and lasts for 6 rounds + 1 round per 5 levels gained. The Bard Song has a cooldown of 1 turn before it may be used again.~
-          GET_STRREF %kit_desc% desc_text
-          INNER_PATCH_SAVE desc_text ~%desc_text%~ BEGIN
-            REPLACE_TEXTUALLY ~%old_BARD_eff%~ ~%new_BARD_eff%~
-            REPLACE_TEXTUALLY ~%old_BARD%~ ~%old_BARD%
-            
-%new_BARD%~
+ACTION_PHP_EACH c0bw_bard_clabs AS kit_clab => unused BEGIN
+  ACTION_IF FILE_EXISTS_IN_GAME ~%kit_clab%.2DA~ BEGIN
+    COPY_EXISTING ~%kit_clab%.2DA~ ~override~
+      COUNT_2DA_COLS clab_columns
+      READ_2DA_ENTRIES_NOW clab_rows clab_columns
+      FOR (row = 0; row < clab_rows; ++row) BEGIN
+        FOR (column = 1; column < clab_columns; ++column) BEGIN
+          READ_2DA_ENTRY_FORMER clab_rows row column grant
+          PATCH_IF ~%grant%~ STRING_EQUAL_CASE ~AP_C0BARDX~ BEGIN
+            SET_2DA_ENTRY row column clab_columns ~****~
           END
-          SET_2DA_ENTRY index 4 col_count RESOLVE_STR_REF (~%desc_text%~)
-            PRETTY_PRINT_2DA
-		END
-		
+        END
       END
-      BUT_ONLY
-    END
+      PATCH_IF finite_ready BEGIN
+        LPF set_clab_2da_entries INT_VAR f_MinLevel = 1 f_MaxLevel = 1 STR_VAR f_Entry = AP_C0BARDX END
+        PRETTY_PRINT_2DA
+      END
+    BUT_ONLY
   END
+END
 
-COPY_EXISTING ~enginest.2da~ ~override~
-  COUNT_2DA_ROWS 2 rows
-  FOR (row = 0 ; row < rows ; ++row) BEGIN
-    READ_2DA_ENTRY row 0 2 entry
-    PATCH_IF (("%entry%" STRING_COMPARE_CASE "STRREF_FEEDBACK_BATTLESONGBEGIN"      = 0) OR
-              ("%entry%" STRING_COMPARE_CASE "STRREF_FEEDBACK_BATTLESONGEND"   		= 0)) BEGIN
-      FOR (col = 1; col < 2 ; ++col) BEGIN
-        SET_2DA_ENTRY row col 2 0
-      END
-    END
+ACTION_PHP_EACH c0bw_damaged_resources AS damaged_file => reason BEGIN
+  ACTION_IF reason = 2 BEGIN
+    PRINT ~Bardic Wonders #2004: skipping %damaged_file% at the 65535-effect capacity limit.~
+  END ELSE ACTION_IF reason = 3 BEGIN
+    PRINT ~Bardic Wonders #2004: no projectile IDs available for the required core projectiles (%damaged_file%).~
+  END ELSE ACTION_IF reason = 4 BEGIN
+    PRINT ~Bardic Wonders #2004: missing packaged %damaged_file%.~
+  END ELSE BEGIN
+    PRINT ~Bardic Wonders #2004: skipping damaged %damaged_file%.~
   END
-  PRETTY_PRINT_2DA
-  BUT_ONLY
-  
+END
+INCLUDE ~%MOD_FOLDER%/lib/bardsong_description.tpa~
+// WeiDU owns the explicit state across invocations and restores the original
+// on uninstall. If there was no marker, an absent row already means inactive.
+<<<<<<<< .../inlined/c0bw-song-state.2da
+2DA V1.0
+0
+       FINITE
+ACTIVE %finite_ready%
+>>>>>>>>
+ACTION_IF iwd_modal_present OR plan_attempted OR templates_rejected OR FILE_EXISTS_IN_GAME ~C0BWSYS.2DA~ BEGIN
+  COPY ~.../inlined/c0bw-song-state.2da~ ~override/C0BWSYS.2DA~
+    EVALUATE_BUFFER
+END
+ACTION_IF finite_ready BEGIN
+  LAF c0bw_write_song_description END
+END
+
 COPY_EXISTING_REGEXP GLOB ~.*\.itm~ ~override~ //copies all spell files
 LPF ALTER_EFFECT INT_VAR silent = 1 match_opcode = 99 match_parameter2 = 2 match_parameter1 = 200 parameter1 = 110 END
 LPF ALTER_EFFECT INT_VAR silent = 1 match_opcode = 99 match_parameter2 = 2 match_parameter1 = 300 parameter1 = 120 END
@@ -203,12 +240,24 @@ LPF ALTER_EFFECT INT_VAR silent = 1 match_opcode = 99 match_parameter2 = 2 match
 LPF ALTER_EFFECT INT_VAR silent = 1 match_opcode = 99 match_parameter2 = 2 match_parameter1 = 600 parameter1 = 150 END
 BUT_ONLY
 
-COPY_EXISTING_REGEXP GLOB ~^.+\.bcs~ ~override~ //Parse through all dlg files
-                DECOMPILE_AND_PATCH BEGIN
-                    REPLACE_TEXTUALLY ~!ModalState(BATTLESONG)~ ~!CheckSpellState(Myself,BARD_SONG)~ //Replace trigger respecting OR and !
-                END
-                DECOMPILE_AND_PATCH BEGIN
-                    //Recommended by refactor trigger to fix whitespace
-                END
+ACTION_IF finite_ready BEGIN
+  COPY_EXISTING ~enginest.2da~ ~override~
+    COUNT_2DA_ROWS 2 rows
+    FOR (row = 0; row < rows; ++row) BEGIN
+      READ_2DA_ENTRY row 0 2 entry
+      PATCH_IF ~%entry%~ STRING_EQUAL_CASE ~STRREF_FEEDBACK_BATTLESONGBEGIN~
+        OR ~%entry%~ STRING_EQUAL_CASE ~STRREF_FEEDBACK_BATTLESONGEND~ BEGIN
+        SET_2DA_ENTRY row 1 2 0
+      END
+    END
+    PRETTY_PRINT_2DA
+  BUT_ONLY
 
-        BUT_ONLY
+  COPY_EXISTING_REGEXP GLOB ~^.+\.bcs~ ~override~
+    DECOMPILE_AND_PATCH BEGIN
+      REPLACE_TEXTUALLY ~!ModalState(BATTLESONG)~ ~!CheckSpellState(Myself,BARD_SONG)~
+    END
+    // Preserve the legacy trigger formatting pass.
+    DECOMPILE_AND_PATCH BEGIN END
+  BUT_ONLY
+END

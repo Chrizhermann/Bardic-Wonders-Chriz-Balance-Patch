@@ -1,0 +1,1369 @@
+DEFINE_PATCH_FUNCTION c0bw_has_header
+  INT_VAR minimum_size = 8
+  STR_VAR signature = ""
+  RET c0bw_valid
+BEGIN
+  SET c0bw_valid = 0
+  PATCH_IF SOURCE_SIZE >= minimum_size BEGIN
+    READ_ASCII 0 actual_signature (8)
+    SET c0bw_valid = ~%actual_signature%~ STRING_EQUAL_CASE ~%signature%~
+  END
+END
+
+DEFINE_PATCH_FUNCTION c0bw_validate_spl
+  INT_VAR insertions_per_ability = 0
+  RET c0bw_valid c0bw_capacity
+BEGIN
+  SET c0bw_capacity = 0
+  LPF c0bw_has_header INT_VAR minimum_size = 0x72 STR_VAR signature = ~SPL V1  ~ RET c0bw_valid END
+  PATCH_IF c0bw_valid BEGIN
+    READ_LONG 0x64 ability_table
+    READ_SHORT 0x68 ability_count
+    READ_LONG 0x6A effect_table
+    READ_SHORT 0x6E global_first
+    READ_SHORT 0x70 global_count
+    // Bounds matter even for empty tables. Counts and indices are unsigned
+    // words. Divide the remaining bytes before forming either table's end.
+    SET c0bw_valid = ability_table >= 0x72 AND ability_table <= SOURCE_SIZE
+      AND effect_table >= 0x72 AND effect_table <= SOURCE_SIZE
+    PATCH_IF c0bw_valid BEGIN
+      SET c0bw_valid = ability_count <= (SOURCE_SIZE - ability_table) / 0x28
+    END
+    PATCH_IF c0bw_valid BEGIN
+      // WeiDU 24900's effect insertion and deletion keep the ability offset
+      // fixed. They require effects after the abilities, even at an empty table.
+      SET c0bw_valid = ability_count = 0 OR effect_table >= ability_table + ability_count * 0x28
+    END
+    PATCH_IF c0bw_valid BEGIN
+      SET effect_slots = (SOURCE_SIZE - effect_table) / 0x30
+      SET max_effect_end = 0
+      SET max_ability_end = 0
+      SET total_count = global_count
+      PATCH_IF global_count > 0 BEGIN
+        SET max_effect_end = global_first + global_count
+      END
+      SET c0bw_valid = max_effect_end <= effect_slots
+      FOR (i = 0; c0bw_valid AND i < ability_count; ++i) BEGIN
+        SET ability = ability_table + i * 0x28
+        READ_SHORT (ability + 0x1E) effect_count
+        READ_SHORT (ability + 0x20) first_effect
+        SET total_count += effect_count
+        PATCH_IF effect_count > 0 BEGIN
+          SET effect_end = first_effect + effect_count
+          SET c0bw_valid = effect_end <= effect_slots
+            AND (global_count = 0 OR effect_end <= global_first OR first_effect >= global_first + global_count)
+          // Packed ability spans usually arrive in order. Check earlier
+          // spans only when this one starts below an earlier end.
+          PATCH_IF c0bw_valid AND first_effect < max_ability_end BEGIN
+            FOR (j = 0; c0bw_valid AND j < i; ++j) BEGIN
+              SET previous = ability_table + j * 0x28
+              READ_SHORT (previous + 0x1E) previous_count
+              READ_SHORT (previous + 0x20) previous_first
+              SET c0bw_valid = previous_count = 0 OR effect_end <= previous_first
+                OR first_effect >= previous_first + previous_count
+            END
+          END
+          SET max_ability_end = effect_end > max_ability_end ? effect_end : max_ability_end
+          SET max_effect_end = effect_end > max_effect_end ? effect_end : max_effect_end
+        END
+      END
+      PATCH_IF c0bw_valid BEGIN
+        SET c0bw_capacity = total_count + ability_count * insertions_per_ability > 0xFFFF
+        SET c0bw_valid = NOT c0bw_capacity AND (insertions_per_ability = 0 OR ability_count > 0)
+      END
+    END
+  END
+END
+
+// Bucket zero is the casting slice. The remaining buckets are in ability
+// order, even when their physical records are stored in a different order.
+DEFINE_PATCH_FUNCTION c0bw_read_effect_slices
+  RET ability_table ability_count effect_table total_count last_effect
+  RET_ARRAY c0bw_first c0bw_count
+BEGIN
+  READ_LONG 0x64 ability_table
+  READ_SHORT 0x68 ability_count
+  READ_LONG 0x6A effect_table
+  SET total_count = 0
+  SET last_effect = 0
+  PATCH_CLEAR_ARRAY c0bw_first
+  PATCH_CLEAR_ARRAY c0bw_count
+  FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+    PATCH_IF bucket = 0 BEGIN
+      READ_SHORT 0x6E first
+      READ_SHORT 0x70 count
+    END ELSE BEGIN
+      SET header = ability_table + (bucket - 1) * 0x28
+      READ_SHORT (header + 0x20) first
+      READ_SHORT (header + 0x1E) count
+    END
+    SET $c0bw_first(~%bucket%~) = first
+    SET $c0bw_count(~%bucket%~) = count
+    SET total_count += count
+    PATCH_IF count > 0 AND first + count > last_effect BEGIN
+      SET last_effect = first + count
+    END
+  END
+END
+
+// Accumulate diagnostics across passes and nested functions. The component
+// prints each resource once without turning a skipped file into a warning exit.
+DEFINE_PATCH_MACRO c0bw_record_damage BEGIN
+  SPRINT damaged_file ~%SOURCE_FILE%~
+  TO_UPPER damaged_file
+  SET $c0bw_damaged_resources(~%damaged_file%~) = 1
+END
+
+DEFINE_PATCH_MACRO c0bw_record_capacity BEGIN
+  SPRINT capacity_file ~%SOURCE_FILE%~
+  TO_UPPER capacity_file
+  SET $c0bw_damaged_resources(~%capacity_file%~) = 2
+END
+
+DEFINE_PATCH_MACRO c0bw_guard_spl BEGIN
+  LPF c0bw_validate_spl RET c0bw_valid c0bw_capacity END
+  PATCH_IF NOT c0bw_valid BEGIN
+    PATCH_IF c0bw_capacity BEGIN
+      LPM c0bw_record_capacity
+    END ELSE BEGIN
+      LPM c0bw_record_damage
+    END
+  END
+END
+
+DEFINE_PATCH_MACRO c0bw_guard_song_loader BEGIN
+  LPF c0bw_validate_spl INT_VAR insertions_per_ability = 1 RET c0bw_valid c0bw_capacity END
+  PATCH_IF NOT c0bw_valid BEGIN
+    PATCH_IF c0bw_capacity BEGIN
+      LPM c0bw_record_capacity
+    END ELSE BEGIN
+      LPM c0bw_record_damage
+    END
+  END
+END
+
+DEFINE_PATCH_MACRO c0bw_validate_eff BEGIN
+  LPF c0bw_has_header INT_VAR minimum_size = 0x110 STR_VAR signature = ~EFF V2.0~ RET c0bw_valid END
+  PATCH_IF c0bw_valid BEGIN
+    READ_ASCII 0x08 inner_signature (8)
+    SET c0bw_valid = ~%inner_signature%~ STRING_EQUAL_CASE ~EFF V2.0~
+  END
+END
+
+DEFINE_PATCH_MACRO c0bw_guard_eff BEGIN
+  LPM c0bw_validate_eff
+  PATCH_IF NOT c0bw_valid BEGIN
+    LPM c0bw_record_damage
+  END
+END
+
+DEFINE_PATCH_MACRO c0bw_guard_projectile BEGIN
+  LPF c0bw_has_header INT_VAR minimum_size = 0x100 STR_VAR signature = ~PRO V1.0~ RET c0bw_valid END
+  PATCH_IF c0bw_valid BEGIN
+    READ_SHORT 0x08 projectile_type
+    SET c0bw_valid = projectile_type >= 1 AND projectile_type <= 3
+      AND SOURCE_SIZE >= projectile_type * 0x100
+  END
+  PATCH_IF NOT c0bw_valid BEGIN
+    LPM c0bw_record_damage
+  END
+END
+
+// The package owns an explicit placeholder. A fallback may point to a
+// previous cast-spell EFF or an unallocated placeholder. Only repeating
+// delivery identifies the pulse. One-shot effects and non-cast EFFs don't.
+DEFINE_PATCH_FUNCTION c0bw_find_fallback_pulse
+  RET controller_pulse
+BEGIN
+  LPF c0bw_read_effect_slices RET ability_count effect_table RET_ARRAY c0bw_first c0bw_count END
+  PATCH_CLEAR_ARRAY c0bw_checked_refs
+  SET candidates = 0
+  SPRINT controller_pulse ""
+  FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+    SET first = $c0bw_first(~%bucket%~)
+    SET count = $c0bw_count(~%bucket%~)
+    FOR (i = 0; i < count; ++i) BEGIN
+      SET effect = effect_table + (first + i) * 0x30
+      PATCH_IF SHORT_AT effect = 272 BEGIN
+        READ_ASCII (effect + 0x14) link (8) NULL
+        TO_UPPER link
+        PATCH_IF ~%link%~ STRING_COMPARE ~~ AND ~%link%~ STRING_COMPARE ~C0SINGIN~
+          AND ~%link%~ STRING_COMPARE ~C0SINGI2~ AND ~%link%~ STRING_COMPARE ~C0ABIVS~
+          AND NOT (VARIABLE_IS_SET $c0bw_checked_refs(~%link%~)) BEGIN
+          SET $c0bw_checked_refs(~%link%~) = 1
+          SET is_pulse = 1
+          PATCH_IF FILE_EXISTS_IN_GAME ~%link%.EFF~ BEGIN
+            INNER_ACTION BEGIN
+              COPY_EXISTING ~%link%.EFF~ ~override~
+                LPM c0bw_validate_eff
+                SET is_pulse = 0
+                PATCH_IF c0bw_valid BEGIN SET is_pulse = LONG_AT 0x10 = 146 END
+              BUT_ONLY
+            END
+          END
+          PATCH_IF is_pulse BEGIN
+            SET candidates += 1
+            SPRINT controller_pulse ~%link%~
+          END
+        END
+      END
+    END
+  END
+  PATCH_IF candidates != 1 BEGIN SPRINT controller_pulse "" END
+END
+
+DEFINE_PATCH_FUNCTION c0bw_bind_controller_pulse
+  STR_VAR controller_pulse = "" pulse = ""
+  RET pulse_ready
+BEGIN
+  LPF c0bw_read_effect_slices RET ability_count effect_table RET_ARRAY c0bw_first c0bw_count END
+  SET pulse_ready = ability_count > 0 AND ~%controller_pulse%~ STRING_COMPARE ~~
+  PATCH_IF pulse_ready BEGIN
+    FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+      SET first = $c0bw_first(~%bucket%~)
+      SET count = $c0bw_count(~%bucket%~)
+      SET repeating = 0
+      FOR (i = 0; i < count; ++i) BEGIN
+        SET effect = effect_table + (first + i) * 0x30
+        READ_SHORT effect opcode
+        PATCH_IF opcode = 177 OR opcode = 272 OR opcode = 328 BEGIN
+          READ_ASCII (effect + 0x14) link (8) NULL
+          PATCH_IF ~%link%~ STRING_EQUAL_CASE ~%controller_pulse%~ BEGIN
+            PATCH_IF opcode = 272 BEGIN SET repeating = 1 END
+            PATCH_IF ~%pulse%~ STRING_COMPARE ~~ BEGIN WRITE_ASCIIE (effect + 0x14) ~%pulse%~ (8) END
+          END
+        END
+      END
+      PATCH_IF bucket > 0 BEGIN SET pulse_ready = pulse_ready AND repeating END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION c0bw_check_symphony_assignment
+  RET assignment_ready
+BEGIN
+  LPF c0bw_read_effect_slices RET ability_count effect_table RET_ARRAY c0bw_first c0bw_count END
+  SET assignment_ready = 0
+  FOR (bucket = 1; bucket <= ability_count AND NOT assignment_ready; ++bucket) BEGIN
+    SET first = $c0bw_first(~%bucket%~)
+    SET count = $c0bw_count(~%bucket%~)
+    FOR (i = 0; i < count AND NOT assignment_ready; ++i) BEGIN
+      SET effect = effect_table + (first + i) * 0x30
+      PATCH_IF SHORT_AT effect = 251 BEGIN
+        READ_ASCII (effect + 0x14) song (8) NULL
+        SET assignment_ready = ~%song%~ STRING_EQUAL_CASE ~C0ABETS2~
+      END
+    END
+  END
+END
+
+// Core assets are checked once, before modifying callers or publishing grants.
+// Valid packaged resources own the result; a valid installed copy is a fallback.
+DEFINE_PATCH_MACRO c0bw_guard_core_asset BEGIN
+  PATCH_MATCH asset_type WITH
+    0 BEGIN
+      LPM c0bw_guard_spl
+      PATCH_IF c0bw_valid BEGIN
+        PATCH_IF SHORT_AT 0x68 = 0 BEGIN
+          SET c0bw_valid = 0
+          LPM c0bw_record_damage
+        END
+      END
+    END
+    1 BEGIN LPM c0bw_guard_song_loader END
+    2 BEGIN
+      LPM c0bw_guard_eff
+      PATCH_IF c0bw_valid AND required_eff_opcode >= 0 BEGIN
+        SET c0bw_valid = LONG_AT 0x10 = required_eff_opcode
+        PATCH_IF NOT c0bw_valid BEGIN LPM c0bw_record_damage END
+      END
+    END
+    4 BEGIN
+      LPM c0bw_guard_spl
+      PATCH_IF c0bw_valid BEGIN
+        SPRINT controller_pulse ~C0BARDSO~
+        PATCH_IF controller_fallback BEGIN LPF c0bw_find_fallback_pulse RET controller_pulse END END
+        LPF c0bw_bind_controller_pulse STR_VAR controller_pulse RET c0bw_valid = pulse_ready END
+        PATCH_IF NOT c0bw_valid BEGIN LPM c0bw_record_damage END
+      END
+    END
+    5 BEGIN
+      LPM c0bw_guard_spl
+      PATCH_IF c0bw_valid BEGIN
+        LPF c0bw_check_symphony_assignment RET c0bw_valid = assignment_ready END
+        PATCH_IF NOT c0bw_valid BEGIN LPM c0bw_record_damage END
+      END
+    END
+    DEFAULT SET c0bw_valid = 0
+  END
+END
+
+// Record both directions. Repeated identical entries retain their binding.
+// Any competing name or number makes that key ineligible for reuse.
+DEFINE_PATCH_MACRO c0bw_record_ids_entry BEGIN
+  TO_UPPER entry_name
+  SPRINT entry_owner ~%entry_name%~
+  PATCH_IF ~%table%~ STRING_EQUAL ~MISSILE~ BEGIN
+    PATCH_MATCH ~%entry_name%~ WITH
+      ~C0 BARDSONG~ BEGIN SPRINT entry_owner ~C0BARDSO~ END
+      ~BARD SONG IGNORE CASTER~ BEGIN SPRINT entry_owner ~C0BDD#SO~ END
+      DEFAULT
+    END
+  END
+  PATCH_IF VARIABLE_IS_SET $c0bw_ids_by_number(~%table%~ ~%entry_id%~) BEGIN
+    PATCH_IF $c0bw_ids_by_number(~%table%~ ~%entry_id%~) STRING_COMPARE_CASE ~%entry_owner%~ BEGIN
+      SPRINT $c0bw_ids_by_number(~%table%~ ~%entry_id%~) ~~
+    END
+  END ELSE BEGIN
+    SPRINT $c0bw_ids_by_number(~%table%~ ~%entry_id%~) ~%entry_owner%~
+  END
+  PATCH_IF ~%entry_name%~ STRING_COMPARE ~~ BEGIN
+    PATCH_IF VARIABLE_IS_SET $c0bw_ids_by_name(~%table%~ ~%entry_name%~) BEGIN
+      PATCH_IF $c0bw_ids_by_name(~%table%~ ~%entry_name%~) != entry_id BEGIN
+        SET $c0bw_ids_by_name(~%table%~ ~%entry_name%~) = ~-1~
+      END
+    END ELSE BEGIN
+      SET $c0bw_ids_by_name(~%table%~ ~%entry_name%~) = entry_id
+    END
+  END
+END
+
+// Scan the IDS token stream. WeiDU's lexer takes the longest match,
+// so a symbol can absorb spaces, digits and "//" after its first letter.
+// A slash starts a comment only when the lexer reaches it as a token.
+DEFINE_PATCH_FUNCTION c0bw_scan_projectile_ids
+  STR_VAR table = "PROJECTL"
+  RET max_id ids_complete
+  RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+BEGIN
+  SET max_id = ~-1~
+  SET ids_complete = 1
+  SET cursor = 0
+  SET entry_id = ~-1~
+  SPRINT entry_name ""
+  SET first_entry = 1
+  SPRINT name_start ~A-Za-z_#~
+  SPRINT name_body ~A-Za-z_0-9#.! /'-~
+  PATCH_IF ~%table%~ STRING_EQUAL ~MISSILE~ BEGIN
+    // WeiDU 249 uses idslexer2 for BG2's MISSILE labels.
+    SPRINT name_start ~A-Za-z_#(*~
+    SPRINT name_body ~A-Za-z_0-9#.! /',()?+-~
+  END
+  WHILE cursor < BUFFER_LENGTH AND ids_complete BEGIN
+    SET ch = BYTE_AT cursor
+    PATCH_IF ch = 0x20 OR ch = 0x09 OR ch = 0x0D OR ch = 0x0A OR ch = 0x0C BEGIN
+      SET cursor += 1
+    END ELSE PATCH_IF ch = 0x2F AND cursor + 1 < BUFFER_LENGTH AND BYTE_AT (cursor + 1) = 0x2F BEGIN
+      SET end_of_line = INDEX_BUFFER (EXACT_MATCH ~%LNL%~ cursor)
+      SET cursor = end_of_line < 0 ? BUFFER_LENGTH : end_of_line + 1
+    END ELSE PATCH_IF ch = 0x2F AND cursor + 1 < BUFFER_LENGTH AND BYTE_AT (cursor + 1) = 0x2A BEGIN
+      SET cursor += 2
+      SET depth = 1
+      WHILE depth > 0 AND cursor < BUFFER_LENGTH BEGIN
+        SET marker = INDEX_BUFFER (~/\*\|\*/~ cursor)
+        PATCH_IF marker < 0 BEGIN
+          SET cursor = BUFFER_LENGTH
+        END ELSE BEGIN
+          SET cursor = marker + 2
+          PATCH_IF BYTE_AT marker = 0x2F BEGIN SET depth += 1 END ELSE BEGIN SET depth -= 1 END
+        END
+      END
+      SET ids_complete = depth = 0
+    END ELSE BEGIN
+      SET name_at = INDEX_BUFFER (CASE_SENSITIVE ~[1-9]*[%name_start%]~ cursor)
+      SET number_at = INDEX_BUFFER (~-?[0-9]~ cursor)
+      PATCH_IF name_at = cursor BEGIN
+        SET name_end = INDEX_BUFFER (CASE_SENSITIVE ~[^%name_body%]~ cursor)
+        SET token_end = name_end < 0 ? BUFFER_LENGTH : name_end
+        PATCH_IF entry_id >= 0 BEGIN
+          SET trimmed_end = token_end
+          WHILE BYTE_AT (trimmed_end - 1) = 0x20 BEGIN SET trimmed_end -= 1 END
+          READ_ASCII cursor token (trimmed_end - cursor)
+          SPRINT entry_name ~%entry_name%%token%~
+        END
+        SET cursor = token_end
+      END ELSE PATCH_IF number_at = cursor BEGIN
+        SET digit_start = cursor + (ch = 0x2D)
+        SET number_end = INDEX_BUFFER (~[^0-9]~ digit_start)
+        PATCH_IF ch = 0x30 AND cursor + 2 < BUFFER_LENGTH AND BYTE_AT (cursor + 1) = 0x78 BEGIN
+          SET hex_end = INDEX_BUFFER (~[^0-9A-Fa-f]~ (cursor + 2))
+          PATCH_IF hex_end != cursor + 2 BEGIN SET number_end = hex_end END
+        END
+        PATCH_IF number_end < 0 BEGIN SET number_end = BUFFER_LENGTH END
+        READ_ASCII cursor id (number_end - cursor)
+        SET cursor = number_end
+        PATCH_IF IS_AN_INT id BEGIN
+          PATCH_IF entry_id >= 0 BEGIN
+            LPM c0bw_record_ids_entry
+            // A first nameless number may be a header count. Native lookup
+            // still checks any such reservation against a candidate pair.
+            PATCH_IF entry_id > max_id AND (NOT first_entry OR ~%entry_name%~ STRING_COMPARE ~~) BEGIN
+              SET max_id = entry_id
+            END
+            SET first_entry = 0
+          END
+          SET entry_id = id
+          SPRINT entry_name ""
+        END
+      END ELSE BEGIN
+        SET cursor += 1
+      END
+    END
+  END
+  PATCH_IF entry_id >= 0 BEGIN
+    LPM c0bw_record_ids_entry
+    PATCH_IF entry_id > max_id AND (NOT first_entry OR ~%entry_name%~ STRING_COMPARE ~~) BEGIN
+      SET max_id = entry_id
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION c0bw_read_projectile_index
+  RET projectile_base index_ready has_missile
+  RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+BEGIN
+  ACTION_CLEAR_ARRAY c0bw_ids_by_name
+  ACTION_CLEAR_ARRAY c0bw_ids_by_number
+  OUTER_SET max_projectile = ~-1~
+  OUTER_SET max_missile = ~-1~
+  OUTER_SET projectl_complete = 0
+  OUTER_SET missile_complete = 1
+  OUTER_SET has_missile = FILE_EXISTS_IN_GAME ~MISSILE.IDS~
+  ACTION_IF FILE_EXISTS_IN_GAME ~PROJECTL.IDS~ BEGIN
+    COPY_EXISTING - ~PROJECTL.IDS~ ~.../c0bw-inlined/projectl-index.ids~
+      LPF c0bw_scan_projectile_ids RET max_projectile = max_id projectl_complete = ids_complete
+        RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+      END
+  END
+  ACTION_IF has_missile BEGIN
+    COPY_EXISTING - ~MISSILE.IDS~ ~.../c0bw-inlined/missile-index.ids~
+      LPF c0bw_scan_projectile_ids STR_VAR table = ~MISSILE~
+        RET max_missile = max_id missile_complete = ids_complete
+        RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+      END
+  END
+  OUTER_SET index_ready = projectl_complete AND missile_complete AND max_projectile >= 0
+  OUTER_SET projectile_base = max_projectile >= max_missile - 1 ? max_projectile : max_missile - 1
+  CLEAR_IDS_MAP
+END
+
+// The caller checked capacity for the aligned pair. An aligned tail also
+// lets a later WeiDU ADD_PROJECTILE continue without filling any gaps.
+DEFINE_ACTION_FUNCTION c0bw_append_projectile
+  INT_VAR projectile_base = ~-1~
+  STR_VAR symbol = "" missile_label = ""
+  RET projectile_base projectile
+BEGIN
+  OUTER_SET projectile_base += 1
+  OUTER_SET projectile = projectile_base + 1
+  APPEND ~PROJECTL.IDS~ ~%projectile_base% %symbol%~
+  ACTION_IF FILE_EXISTS_IN_GAME ~MISSILE.IDS~ BEGIN
+    ACTION_IF ~%missile_label%~ STRING_EQUAL ~~ BEGIN OUTER_SPRINT missile_label ~%symbol%~ END
+    APPEND ~MISSILE.IDS~ ~%projectile% %missile_label%~
+  END
+  CLEAR_IDS_MAP
+END
+
+DEFINE_ACTION_FUNCTION c0bw_resolve_projectile_binding
+  INT_VAR index_ready = 0 has_missile = 0
+  STR_VAR asset = "" legacy_label = ""
+  RET reused occupied projectile
+BEGIN
+  ACTION_TO_UPPER legacy_label
+  OUTER_SET projectl_id = IDS_OF_SYMBOL (~PROJECTL~ ~%asset%~)
+  OUTER_SET projectile = projectl_id + 1
+  OUTER_SET occupied = projectl_id >= 0 OR VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%asset%~)
+  OUTER_SET reused = 0
+  ACTION_IF index_ready AND projectl_id >= 1 AND projectl_id <= 0xFFFE BEGIN
+    OUTER_PATCH ~~ BEGIN
+      LOOKUP_IDS_SYMBOL_OF_INT projectl_name ~PROJECTL~ projectl_id
+      TO_UPPER projectl_name
+    END
+    OUTER_SET reused = ~%projectl_name%~ STRING_EQUAL ~%asset%~
+      AND VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%asset%~)
+      AND $c0bw_ids_by_name(~PROJECTL~ ~%asset%~) = projectl_id
+      AND $c0bw_ids_by_number(~PROJECTL~ ~%projectl_id%~) STRING_EQUAL ~%asset%~
+  END
+  ACTION_IF has_missile BEGIN
+    OUTER_SET canonical_id = IDS_OF_SYMBOL (~MISSILE~ ~%asset%~)
+    OUTER_SET legacy_id = IDS_OF_SYMBOL (~MISSILE~ ~%legacy_label%~)
+    OUTER_SET canonical_seen = VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%asset%~)
+    OUTER_SET legacy_seen = VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%legacy_label%~)
+    OUTER_SET occupied = occupied OR canonical_id >= 0 OR legacy_id >= 0 OR canonical_seen OR legacy_seen
+    ACTION_IF reused BEGIN
+      OUTER_PATCH ~~ BEGIN
+        LOOKUP_IDS_SYMBOL_OF_INT missile_name ~MISSILE~ projectile
+        TO_UPPER missile_name
+      END
+      OUTER_SET missile_seen = VARIABLE_IS_SET $c0bw_ids_by_number(~MISSILE~ ~%projectile%~)
+      OUTER_SET reused = (canonical_id < 0 OR canonical_id = projectile)
+        AND (legacy_id < 0 OR legacy_id = projectile)
+        AND (NOT canonical_seen OR $c0bw_ids_by_name(~MISSILE~ ~%asset%~) = projectile)
+        AND (NOT legacy_seen OR $c0bw_ids_by_name(~MISSILE~ ~%legacy_label%~) = projectile)
+        AND ((NOT missile_seen AND ~%missile_name%~ STRING_EQUAL ~%projectile%~)
+          OR (missile_seen AND $c0bw_ids_by_number(~MISSILE~ ~%projectile%~) STRING_EQUAL ~%asset%~
+            AND ((~%missile_name%~ STRING_EQUAL ~%asset%~ AND canonical_id = projectile)
+              OR (~%missile_name%~ STRING_EQUAL ~%legacy_label%~ AND legacy_id = projectile))))
+    END
+  END
+END
+
+// Stage the requested profiles as one batch without writing PRO or IDS files.
+DEFINE_ACTION_FUNCTION c0bw_plan_core_projectiles
+  INT_VAR controller_only = 0
+  STR_VAR batch = "the required core projectiles" stock_profile = ""
+  RET profiles_ready core_base core_end
+  RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
+    c0bw_resolved_projectiles c0bw_damaged_resources
+BEGIN
+  ACTION_CLEAR_ARRAY c0bw_core_bindings
+  ACTION_CLEAR_ARRAY c0bw_core_labels
+  ACTION_CLEAR_ARRAY c0bw_core_names
+  ACTION_CLEAR_ARRAY c0bw_resolved_projectiles
+  ACTION_CLEAR_ARRAY c0bw_needs_private
+  ACTION_CLEAR_ARRAY c0bw_shipped_labels
+  LAF c0bw_read_projectile_index RET projectile_base index_ready has_missile
+    RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+  END
+  OUTER_SET profiles_ready = 1
+  OUTER_SET new_count = 0
+  OUTER_SET private_count = 0
+  ACTION_FOR_EACH asset IN C0BARDSO C0BWSPA C0BWSNP C0BWSIW C0BWSIA C0BDD#SO BEGIN
+    ACTION_IF (controller_only AND ~%asset%~ STRING_EQUAL ~C0BARDSO~)
+      OR (NOT controller_only AND VARIABLE_IS_SET $c0bw_batch_assets(~%asset%~)) BEGIN
+      OUTER_SPRINT legacy_label ~%asset%~
+      OUTER_SPRINT packaged ~%MOD_FOLDER%/bardsong/projectiles/%asset%.PRO~
+      ACTION_IF ~%asset%~ STRING_EQUAL ~C0BARDSO~ BEGIN
+        OUTER_SPRINT legacy_label ~C0 Bardsong~
+        OUTER_SPRINT packaged ~%MOD_FOLDER%/bardsong/c0bardso.PRO~
+      END ELSE ACTION_IF ~%asset%~ STRING_EQUAL ~C0BDD#SO~ BEGIN
+        OUTER_SPRINT legacy_label ~Bard Song Ignore Caster~
+        OUTER_SPRINT packaged ~%MOD_FOLDER%/darkbloom/c0bdd#so.PRO~
+      END
+      OUTER_SET asset_ready = 0
+      ACTION_IF FILE_EXISTS ~%packaged%~ BEGIN
+        COPY - ~%packaged%~ ~.../c0bw-inlined/core-%asset%.pro~
+          LPM c0bw_guard_projectile
+          SET asset_ready = c0bw_valid
+          PATCH_IF asset_ready BEGIN WRITE_LONG 0x0C (THIS BOR 0x40) END
+      END ELSE BEGIN
+        OUTER_SET $c0bw_damaged_resources(~%asset%.PRO~) = 4
+      END
+      ACTION_IF NOT asset_ready AND FILE_EXISTS_IN_GAME ~%asset%.PRO~ BEGIN
+        COPY_EXISTING - ~%asset%.PRO~ ~.../c0bw-inlined/core-%asset%.pro~
+          LPM c0bw_guard_projectile
+          SET asset_ready = c0bw_valid
+          PATCH_IF asset_ready BEGIN WRITE_LONG 0x0C (THIS BOR 0x40) END
+      END
+      ACTION_IF asset_ready BEGIN
+        LAF c0bw_resolve_projectile_binding INT_VAR index_ready has_missile STR_VAR asset legacy_label
+          RET reused occupied projectile
+        END
+        ACTION_IF NOT reused BEGIN
+          OUTER_SET projectile = 0
+          OUTER_SET new_count += 1
+          OUTER_SET private_count += occupied
+          OUTER_SET $c0bw_needs_private(~%asset%~) = occupied
+          OUTER_SPRINT $c0bw_shipped_labels(~%asset%~) ~%legacy_label%~
+        END
+        OUTER_SET $c0bw_core_bindings(~%asset%~) = projectile
+      END ELSE ACTION_IF ~%asset%~ STRING_COMPARE ~C0BDD#SO~ BEGIN
+        OUTER_SET profiles_ready = 0
+      END
+    END
+  END
+
+  OUTER_SET core_base = projectile_base
+  OUTER_SET core_end = projectile_base
+  ACTION_IF profiles_ready BEGIN
+    LAF c0bw_check_projectile_capacity INT_VAR donor_count = new_count projectile_base index_ready has_missile
+      RET profiles_ready = ids_ready core_base = projectile_base
+    END
+    ACTION_IF profiles_ready BEGIN
+      LAF c0bw_plan_private_projectiles INT_VAR donor_count = private_count has_missile RET_ARRAY c0bw_private_names END
+      OUTER_SET core_end = core_base
+      OUTER_SET private_slot = 0
+      // Keep the established controller/stock registration order.
+      ACTION_FOR_EACH asset IN C0BARDSO C0BWSPA C0BWSNP C0BWSIW C0BWSIA C0BDD#SO BEGIN
+        ACTION_IF VARIABLE_IS_SET $c0bw_core_bindings(~%asset%~) BEGIN
+          OUTER_SET projectile = $c0bw_core_bindings(~%asset%~)
+          OUTER_SPRINT resref ~%asset%~
+          ACTION_IF NOT projectile BEGIN
+            OUTER_SET core_end += 1
+            OUTER_SET projectile = core_end + 1
+            OUTER_SPRINT label $c0bw_shipped_labels(~%asset%~)
+            ACTION_IF $c0bw_needs_private(~%asset%~) BEGIN
+              OUTER_SPRINT resref $c0bw_private_names(~%private_slot%~)
+              OUTER_SPRINT label ~%resref%~
+              OUTER_SET private_slot += 1
+            END
+            OUTER_SPRINT $c0bw_core_labels(~%projectile%~) ~%label%~
+            OUTER_SET $c0bw_core_names(~%resref%~) = 1
+            OUTER_SET $c0bw_core_bindings(~%asset%~) = projectile
+          END
+          OUTER_SPRINT $c0bw_resolved_projectiles(~%projectile%~) ~%resref%~
+        END
+      END
+    END ELSE ACTION_IF ~%stock_profile%~ STRING_COMPARE ~~ BEGIN
+      OUTER_SET $c0bw_damaged_resources(~%stock_profile%.PRO~) = 3
+    END ELSE BEGIN
+      PRINT ~Bardic Wonders #2004: no projectile IDs available for %batch%.~
+    END
+  END
+END
+
+// Called for an eligible native batch or for the profiles of one validated wrapper.
+DEFINE_ACTION_FUNCTION c0bw_commit_core_projectiles BEGIN
+  ACTION_PHP_EACH c0bw_core_bindings AS asset => projectile BEGIN
+    OUTER_SPRINT resref $c0bw_resolved_projectiles(~%projectile%~)
+    COPY ~.../c0bw-inlined/core-%asset%.pro~ ~override/%resref%.PRO~
+  END
+  OUTER_SET projectile_base = core_base
+  OUTER_WHILE projectile_base < core_end BEGIN
+    OUTER_SET projectile = projectile_base + 2
+    OUTER_SPRINT symbol $c0bw_resolved_projectiles(~%projectile%~)
+    OUTER_SPRINT missile_label $c0bw_core_labels(~%projectile%~)
+    LAF c0bw_append_projectile INT_VAR projectile_base STR_VAR symbol missile_label RET projectile_base END
+  END
+END
+
+// Keep the native plan in its own WeiDU variable scope. Return the two
+// shared IDs to the subsequent finite planner after committing the batch.
+DEFINE_ACTION_FUNCTION c0bw_patch_iwd_modal_songs
+  INT_VAR iwd_jester_wrapper = 0
+  RET iwd_modal_present iwd_stock_projectile iwd_enemy_projectile
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  OUTER_SET iwd_modal_present = 0
+  OUTER_SET iwd_modal_ready = 0
+  OUTER_SET iwd_stock_projectile = 0
+  OUTER_SET iwd_enemy_projectile = 0
+  ACTION_CLEAR_ARRAY c0bw_iwd_modal_songs
+  ACTION_CLEAR_ARRAY c0bw_iwd_valid_songs
+  ACTION_CLEAR_ARRAY c0bw_batch_assets
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_iwd_modal_songs BEGIN
+    SPCL115 => C0BWSIA
+    SPCL116 => C0BWSIA
+    SPCL117 => C0BWSIA
+    SPCL118 => C0BWSIW
+    SPCL119 => C0BWSIA
+    SPCL120 => C0BWSIA
+    SPCL542A => C0BWSIA
+    SPCL920A => C0BWSPA
+  END
+  ACTION_IF NOT iwd_jester_wrapper BEGIN
+    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_iwd_modal_songs BEGIN SPCL751A => C0BWSIW END
+  END
+  ACTION_PHP_EACH c0bw_iwd_modal_songs AS song => profile BEGIN
+    ACTION_IF FILE_EXISTS_IN_GAME ~%song%.SPL~ BEGIN
+      COPY_EXISTING ~%song%.SPL~ ~override~
+        LPM c0bw_guard_spl
+        PATCH_IF c0bw_valid AND SHORT_AT 0x68 > 0 BEGIN
+          SET $c0bw_iwd_valid_songs(~%song%~) = 1
+          SET $c0bw_batch_assets(~%profile%~) = 1
+          SET iwd_modal_present = 1
+        END
+      BUT_ONLY
+    END
+  END
+  ACTION_IF iwd_modal_present BEGIN
+    LAF c0bw_plan_core_projectiles STR_VAR batch = ~the native IWD modal projectiles~
+      RET iwd_modal_ready = profiles_ready core_base core_end
+      RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
+        c0bw_resolved_projectiles c0bw_damaged_resources
+    END
+    ACTION_IF iwd_modal_ready BEGIN
+      LAF c0bw_commit_core_projectiles END
+      ACTION_IF VARIABLE_IS_SET $c0bw_core_bindings(C0BWSPA) BEGIN
+        OUTER_SET iwd_stock_projectile = $c0bw_core_bindings(C0BWSPA)
+      END
+      ACTION_IF VARIABLE_IS_SET $c0bw_core_bindings(C0BWSIW) BEGIN
+        OUTER_SET iwd_enemy_projectile = $c0bw_core_bindings(C0BWSIW)
+      END
+      ACTION_PHP_EACH c0bw_iwd_modal_songs AS song => profile BEGIN
+        ACTION_IF VARIABLE_IS_SET $c0bw_iwd_valid_songs(~%song%~) BEGIN
+          COPY_EXISTING ~%song%.SPL~ ~override~
+            LPF ALTER_SPELL_HEADER INT_VAR projectile = $c0bw_core_bindings(~%profile%~) END
+          BUT_ONLY
+        END
+      END
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION c0bw_resolve_core_asset
+  INT_VAR asset_type = 0 required_eff_opcode = ~-1~
+  STR_VAR packaged = "" asset = ""
+  RET ready controller_pulse
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  OUTER_SET ready = 0
+  OUTER_SET controller_fallback = 0
+  OUTER_SPRINT controller_pulse ""
+  OUTER_SPRINT extension SPL
+  ACTION_IF asset_type = 2 BEGIN OUTER_SPRINT extension EFF END
+  OUTER_SPRINT filename ~%asset%.%extension%~
+  ACTION_IF FILE_EXISTS ~%packaged%~ BEGIN
+    COPY ~%packaged%~ ~override~
+      LPM c0bw_guard_core_asset
+      SET ready = c0bw_valid
+    BUT_ONLY
+  END ELSE BEGIN
+    PRINT ~Bardic Wonders #2004: missing packaged %filename%.~
+  END
+  OUTER_SET use_package = ready
+  ACTION_IF NOT ready AND FILE_EXISTS_IN_GAME ~%filename%~ BEGIN
+    OUTER_SET controller_fallback = 1
+    COPY_EXISTING ~%filename%~ ~override~
+      LPM c0bw_guard_core_asset
+      SET ready = c0bw_valid
+    BUT_ONLY
+  END
+  ACTION_IF ready AND use_package BEGIN
+    COPY ~%packaged%~ ~override/%filename%~
+  END
+END
+
+DEFINE_ACTION_FUNCTION c0bw_resolve_wrapper_templates
+  RET templates_ready templates_rejected controller_pulse
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  LAF c0bw_resolve_core_asset INT_VAR asset_type = 4
+    STR_VAR asset = ~C0BARDSO~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardso.spl~
+    RET controller_ready = ready controller_pulse RET_ARRAY c0bw_damaged_resources
+  END
+  LAF c0bw_resolve_core_asset INT_VAR asset_type = 2 required_eff_opcode = 146
+    STR_VAR asset = ~C0BARDSO~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardso.EFF~
+    RET pulse_template_ready = ready RET_ARRAY c0bw_damaged_resources
+  END
+  OUTER_SET templates_ready = controller_ready AND pulse_template_ready
+  OUTER_SET templates_rejected = (NOT controller_ready AND FILE_EXISTS_IN_GAME ~C0BARDSO.SPL~)
+    OR (NOT pulse_template_ready AND FILE_EXISTS_IN_GAME ~C0BARDSO.EFF~)
+END
+
+// Stage a packed table before the old one. Work with integers so WeiDU never
+// interpolates a literal percent sequence or treats a NUL as a terminator.
+DEFINE_PATCH_MACRO c0bw_stage_effect_table BEGIN
+  INSERT_BYTES effect_table (new_total * 0x30)
+  SET source_table = effect_table + new_total * 0x30
+  SET output_first = 0
+  SET output_index = 0
+END
+
+DEFINE_PATCH_MACRO c0bw_copy_effect_record BEGIN
+  FOR (word = 0; word < 0x30; word += 4) BEGIN
+    READ_LONG (source_effect + word) effect_word
+    WRITE_LONG (destination_effect + word) effect_word
+  END
+END
+
+DEFINE_PATCH_MACRO c0bw_finish_effect_slice BEGIN
+  SET output_count = output_index - output_first
+  PATCH_IF bucket = 0 BEGIN
+    WRITE_SHORT 0x6E 0
+    WRITE_SHORT 0x70 output_count
+  END ELSE BEGIN
+    SET header = ability_table + (bucket - 1) * 0x28
+    WRITE_SHORT (header + 0x20) output_first
+    WRITE_SHORT (header + 0x1E) output_count
+  END
+  SET output_first = output_index
+END
+
+DEFINE_PATCH_FUNCTION c0bw_write_song_effect
+  INT_VAR offset = 0 opcode = 0 target = 1 timing = 1 duration = 0 parameter2 = 0
+  STR_VAR resource = ""
+BEGIN
+  WRITE_SHORT offset opcode
+  WRITE_BYTE (offset + 2) target
+  WRITE_LONG (offset + 8) parameter2
+  WRITE_BYTE (offset + 0x0C) timing
+  WRITE_LONG (offset + 0x0E) duration
+  WRITE_BYTE (offset + 0x12) 100
+  WRITE_ASCIIE (offset + 0x14) ~%resource%~ (8)
+END
+
+// Append one effect per ability. Symphony also adds a level-specific finale
+// to its first eleven abilities. Remove presentation effects only from the
+// separate invisibility spell's ability slices.
+DEFINE_PATCH_FUNCTION c0bw_extend_song_effects
+  INT_VAR opcode = 309 target = 1 timing = 1 duration = 0 parameter2 = 0
+    strip_messages = 0 symphony = 0
+  STR_VAR resource = ""
+  RET c0bw_extended
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  LPF c0bw_read_effect_slices RET ability_table ability_count effect_table last_effect
+    RET_ARRAY c0bw_first c0bw_count
+  END
+  SET c0bw_extended = 0
+  SET finale_count = ability_count < 11 ? ability_count : 11
+  SET new_total = ability_count + (symphony ? finale_count : 0)
+  FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+    SET first = $c0bw_first(~%bucket%~)
+    SET count = $c0bw_count(~%bucket%~)
+    SET new_total += count
+    PATCH_IF strip_messages AND bucket > 0 BEGIN
+      FOR (i = 0; i < count; ++i) BEGIN
+        READ_SHORT (effect_table + (first + i) * 0x30) old_opcode
+        PATCH_IF old_opcode = 139 OR old_opcode = 136 BEGIN
+          SET new_total -= 1
+        END
+      END
+    END
+  END
+  PATCH_IF new_total <= 0xFFFF BEGIN
+    LPM c0bw_stage_effect_table
+    FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+      SET first = $c0bw_first(~%bucket%~)
+      SET count = $c0bw_count(~%bucket%~)
+      FOR (i = 0; i < count; ++i) BEGIN
+        SET source_effect = source_table + (first + i) * 0x30
+        READ_SHORT source_effect old_opcode
+        PATCH_IF bucket = 0 OR NOT strip_messages OR (old_opcode != 139 AND old_opcode != 136) BEGIN
+          SET destination_effect = effect_table + output_index * 0x30
+          LPM c0bw_copy_effect_record
+          SET output_index += 1
+        END
+      END
+      PATCH_IF bucket > 0 BEGIN
+        SET append_at = effect_table + output_index * 0x30
+        LPF c0bw_write_song_effect
+          INT_VAR offset = append_at opcode target timing duration parameter2
+          STR_VAR resource
+        END
+        SET output_index += 1
+        PATCH_IF symphony AND bucket <= 11 BEGIN
+          SET append_at = effect_table + output_index * 0x30
+          LPF c0bw_write_song_effect INT_VAR offset = append_at opcode = 326 target = 9 timing = 4
+            duration = (600 + (bucket - 1) * 100 + 14) / 15
+            STR_VAR resource = ~C0ABIVI~
+          END
+          SET output_index += 1
+        END
+      END
+      LPM c0bw_finish_effect_slice
+    END
+    DELETE_BYTES source_table (last_effect * 0x30)
+    SET c0bw_extended = 1
+  END ELSE BEGIN
+    LPM c0bw_record_capacity
+  END
+END
+
+// Replay the legacy loop's absolute indices. Each ability snapshots its
+// current bounds. Each pair of CLONE_EFFECT calls shifts original opcode
+// 251 records by two slots per cloned donor at or before that record. A
+// trigger from a preceding slice can shift into the frozen loop range.
+DEFINE_PATCH_FUNCTION c0bw_assignment_passes
+  INT_VAR ability_count = 0 trigger_count = 0 limit = 0
+  RET passes
+BEGIN
+  SET passes = 0
+  SET packed_start = $c0bw_count(~0~)
+  SET preceding_matches = $c0bw_matches(~0~)
+  FOR (bucket = 1; bucket <= ability_count AND passes <= limit; ++bucket) BEGIN
+    SET count = $c0bw_count(~%bucket%~)
+    SET bucket_matches = $c0bw_matches(~%bucket%~)
+    SET cursor = packed_start + 2 * passes * preceding_matches
+    SET snapshot_end = cursor + count + 2 * passes * bucket_matches
+    WHILE cursor < snapshot_end AND passes <= limit BEGIN
+      // Live trigger positions are monotonic, even after insertions.
+      SET lower = 0
+      SET upper = trigger_count
+      WHILE lower < upper BEGIN
+        SET middle = (lower + upper) / 2
+        SET position = $c0bw_trigger_index(~%middle%~) + 2 * passes * $c0bw_trigger_prefix(~%middle%~)
+        PATCH_IF position < cursor BEGIN
+          SET lower = middle + 1
+        END ELSE BEGIN
+          SET upper = middle
+        END
+      END
+      SET position = snapshot_end
+      PATCH_IF lower < trigger_count BEGIN
+        SET position = $c0bw_trigger_index(~%lower%~) + 2 * passes * $c0bw_trigger_prefix(~%lower%~)
+      END
+      PATCH_IF position < snapshot_end BEGIN
+        SET passes += 1
+      END
+      SET cursor = position + 1
+    END
+    SET preceding_matches += bucket_matches
+    SET packed_start += count
+  END
+END
+
+DEFINE_PATCH_FUNCTION c0bw_add_assignment_links
+  INT_VAR external = 0
+  STR_VAR bardsong_name = "" song_name = ""
+  RET c0bw_linked
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  SET c0bw_linked = 0
+  PATCH_IF INDEX_BUFFER (CASE_INSENSITIVE EXACT_MATCH ~%bardsong_name%~) >= 0 BEGIN
+    LPF c0bw_read_effect_slices RET ability_table ability_count effect_table total_count last_effect
+      RET_ARRAY c0bw_first c0bw_count
+    END
+    SET matches = 0
+    SET packed_start = 0
+    SET trigger_count = 0
+    PATCH_CLEAR_ARRAY c0bw_matches
+    PATCH_CLEAR_ARRAY c0bw_trigger_index
+    PATCH_CLEAR_ARRAY c0bw_trigger_prefix
+    FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+      SET first = $c0bw_first(~%bucket%~)
+      SET count = $c0bw_count(~%bucket%~)
+      SET bucket_matches = 0
+      FOR (i = 0; i < count; ++i) BEGIN
+        SET offset = effect_table + (first + i) * 0x30
+        PATCH_IF SHORT_AT offset = 251 BEGIN
+          READ_ASCII (offset + 0x14) assigned
+          // CLONE_EFFECT's default limit is 999 matches per slice.
+          PATCH_IF (NOT external OR bucket_matches < 999)
+            AND ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
+            SET bucket_matches += 1
+          END
+          PATCH_IF external BEGIN
+            SET $c0bw_trigger_index(~%trigger_count%~) = packed_start + i
+            SET $c0bw_trigger_prefix(~%trigger_count%~) = matches + bucket_matches
+            SET trigger_count += 1
+          END
+        END
+      END
+      SET $c0bw_matches(~%bucket%~) = bucket_matches
+      SET matches += bucket_matches
+      SET packed_start += count
+    END
+    PATCH_IF matches > 0 BEGIN
+      SET limit = (0xFFFF - total_count) / (2 * matches)
+      SET passes = 1
+      PATCH_IF external BEGIN
+        LPF c0bw_assignment_passes INT_VAR ability_count trigger_count limit RET passes END
+      END
+      PATCH_IF passes > limit BEGIN
+        LPM c0bw_record_capacity
+      END ELSE PATCH_IF passes > 0 BEGIN
+        SET new_total = total_count + 2 * matches * passes
+        LPM c0bw_stage_effect_table
+        FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+          SET first = $c0bw_first(~%bucket%~)
+          SET count = $c0bw_count(~%bucket%~)
+          SET matches_left = $c0bw_matches(~%bucket%~)
+          FOR (i = 0; i < count; ++i) BEGIN
+            SET source_effect = source_table + (first + i) * 0x30
+            PATCH_IF matches_left > 0 AND SHORT_AT source_effect = 251 BEGIN
+              READ_ASCII (source_effect + 0x14) assigned
+              PATCH_IF ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
+                SET matches_left -= 1
+                FOR (pass = 0; pass < passes; ++pass) BEGIN
+                  SET destination_effect = effect_table + output_index * 0x30
+                  LPM c0bw_copy_effect_record
+                  WRITE_SHORT destination_effect 326
+                  WRITE_BYTE (destination_effect + 2) 2
+                  WRITE_LONG (destination_effect + 4) 0
+                  WRITE_LONG (destination_effect + 8) 0
+                  WRITE_BYTE (destination_effect + 0x0C) 1
+                  WRITE_ASCII (destination_effect + 0x14) ~C0BARDX~ (8)
+                  SET output_index += 1
+
+                  SET destination_effect = effect_table + output_index * 0x30
+                  LPM c0bw_copy_effect_record
+                  WRITE_SHORT destination_effect 309
+                  WRITE_BYTE (destination_effect + 2) 2
+                  WRITE_LONG (destination_effect + 4) 1
+                  WRITE_LONG (destination_effect + 8) 0
+                  WRITE_BYTE (destination_effect + 0x0C) 4
+                  WRITE_LONG (destination_effect + 0x0E) 1
+                  WRITE_ASCIIE (destination_effect + 0x14) ~%song_name%~ (8)
+                  SET output_index += 1
+                END
+              END
+            END
+            SET destination_effect = effect_table + output_index * 0x30
+            LPM c0bw_copy_effect_record
+            SET output_index += 1
+          END
+          LPM c0bw_finish_effect_slice
+        END
+        DELETE_BYTES source_table (last_effect * 0x30)
+        SET c0bw_linked = 1
+      END
+    END
+  END
+END
+
+// Fixed-width edits need only the declared slices.
+DEFINE_PATCH_FUNCTION c0bw_alter_song_effects
+  INT_VAR match_opcode = ~-1~ parameter1 = 0
+  STR_VAR match_resource = "" resource = ""
+BEGIN
+  LPF c0bw_read_effect_slices RET ability_count effect_table RET_ARRAY c0bw_first c0bw_count END
+  FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+    SET first = $c0bw_first(~%bucket%~)
+    SET count = $c0bw_count(~%bucket%~)
+    FOR (i = 0; i < count; ++i) BEGIN
+      SET offset = effect_table + (first + i) * 0x30
+      PATCH_IF match_opcode >= 0 BEGIN
+        PATCH_IF SHORT_AT offset = match_opcode BEGIN
+          WRITE_LONG (offset + 4) parameter1
+        END
+      END ELSE BEGIN
+        READ_ASCII (offset + 0x14) existing (8) NULL
+        PATCH_IF ~%existing%~ STRING_EQUAL_CASE ~%match_resource%~ BEGIN
+          WRITE_ASCIIE (offset + 0x14) ~%resource%~ (8)
+        END
+      END
+    END
+  END
+END
+
+// Projectile 1 is direct delivery without a PRO. For an external song,
+// validate its donors before making private copies with the save flag.
+DEFINE_PATCH_FUNCTION c0bw_check_song_projectiles
+  INT_VAR require_save_flag = 1 core_pending = 0
+  RET projectiles_ready donor_count
+  RET_ARRAY c0bw_song_donors c0bw_damaged_resources
+BEGIN
+  GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
+  SET projectiles_ready = SHORT_AT 0x68 > 0
+  SET donor_count = 0
+  PATCH_CLEAR_ARRAY c0bw_checked_projectiles
+  PATCH_IF NOT require_save_flag BEGIN PATCH_CLEAR_ARRAY c0bw_song_donors END
+  PHP_EACH song_headers AS header_index => header BEGIN
+    READ_SHORT (header + 0x26) projectile
+    PATCH_IF projectile != 1 AND NOT (VARIABLE_IS_SET $c0bw_checked_projectiles(~%projectile%~)) BEGIN
+      SET projectile_ready = 0
+      PATCH_IF require_save_flag AND core_pending AND VARIABLE_IS_SET $c0bw_resolved_projectiles(~%projectile%~) BEGIN
+        // The pending profile already passed the PRO guard and has the save flag.
+        SET projectile_ready = 1
+      END ELSE PATCH_IF projectile > 1 BEGIN
+        LOOKUP_IDS_SYMBOL_OF_INT projectile_name ~PROJECTL~ (projectile - 1)
+        TO_UPPER projectile_name
+        SET binding_ready = 1
+        PATCH_IF require_save_flag AND VARIABLE_IS_SET $c0bw_resolved_projectiles(~%projectile%~) BEGIN
+          SET binding_ready = $c0bw_resolved_projectiles(~%projectile%~) STRING_EQUAL ~%projectile_name%~
+        END
+        PATCH_IF binding_ready AND FILE_EXISTS_IN_GAME ~%projectile_name%.PRO~ BEGIN
+          INNER_ACTION BEGIN
+            COPY_EXISTING ~%projectile_name%.PRO~ ~override~
+              LPM c0bw_guard_projectile
+              PATCH_IF c0bw_valid BEGIN
+                SET projectile_ready = NOT require_save_flag OR (LONG_AT 0x0C BAND 0x40) != 0
+              END
+            BUT_ONLY
+          END
+          PATCH_IF projectile_ready AND NOT require_save_flag BEGIN
+            SPRINT $c0bw_song_donors(~%projectile%~) ~%projectile_name%~
+            SET donor_count += 1
+          END
+        END
+      END
+      SET $c0bw_checked_projectiles(~%projectile%~) = 1
+      SET projectiles_ready = projectiles_ready AND projectile_ready
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION c0bw_check_projectile_capacity
+  INT_VAR donor_count = 0 projectile_base = ~-1~ index_ready = 0 has_missile = 0
+  RET ids_ready projectile_base
+BEGIN
+  OUTER_SET ids_ready = donor_count = 0
+  ACTION_IF donor_count > 0 AND index_ready AND projectile_base <= 0xFFFE - donor_count BEGIN
+    OUTER_SET candidate = projectile_base + 1
+    OUTER_SET free_pairs = 0
+    OUTER_WHILE free_pairs < donor_count AND candidate <= 0xFFFE - (donor_count - free_pairs) + 1 BEGIN
+      OUTER_SET missile_id = candidate + 1
+      OUTER_SPRINT missile_label ~%missile_id%~
+      OUTER_PATCH ~~ BEGIN
+        LOOKUP_IDS_SYMBOL_OF_INT projectile_label ~PROJECTL~ candidate
+        PATCH_IF has_missile BEGIN
+          LOOKUP_IDS_SYMBOL_OF_INT missile_label ~MISSILE~ missile_id
+        END
+      END
+      // An unoccupied number is returned as its decimal spelling.
+      ACTION_IF ~%projectile_label%~ STRING_EQUAL ~%candidate%~
+        AND ~%missile_label%~ STRING_EQUAL ~%missile_id%~ BEGIN
+        OUTER_SET free_pairs += 1
+      END ELSE BEGIN
+        OUTER_SET projectile_base = candidate
+        OUTER_SET free_pairs = 0
+      END
+      OUTER_SET candidate += 1
+    END
+    OUTER_SET ids_ready = free_pairs = donor_count
+  END
+END
+
+// The ascending serial also keeps the names distinct within this batch.
+// Check both parsed tables in addition to WeiDU's authoritative lookups.
+DEFINE_ACTION_FUNCTION c0bw_plan_private_projectiles
+  INT_VAR donor_count = 0 has_missile = 0
+  RET_ARRAY c0bw_private_names
+BEGIN
+  ACTION_CLEAR_ARRAY c0bw_private_names
+  OUTER_SET serial = 0
+  OUTER_SET slot = 0
+  OUTER_WHILE slot < donor_count BEGIN
+    OUTER_SPRINT symbol ~C0P%serial%~
+    OUTER_SET serial += 1
+    ACTION_IF NOT FILE_EXISTS_IN_GAME ~%symbol%.PRO~
+      AND NOT VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%symbol%~)
+      AND NOT VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%symbol%~)
+      AND NOT VARIABLE_IS_SET $c0bw_core_names(~%symbol%~)
+      AND IDS_OF_SYMBOL (~PROJECTL~ ~%symbol%~) < 0
+      AND (NOT has_missile OR IDS_OF_SYMBOL (~MISSILE~ ~%symbol%~) < 0) BEGIN
+      OUTER_SPRINT $c0bw_private_names(~%slot%~) ~%symbol%~
+      OUTER_SET slot += 1
+    END
+  END
+END
+
+// The entire plan has passed validation. Share a private copy among all
+// abilities that had the same donor ID.
+DEFINE_PATCH_FUNCTION c0bw_register_external_projectiles
+  INT_VAR projectile_base = ~-1~
+BEGIN
+  PATCH_CLEAR_ARRAY c0bw_external_projectiles
+  SET slot = 0
+  GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
+  PHP_EACH song_headers AS header_index => header BEGIN
+    READ_SHORT (header + 0x26) original_id
+    PATCH_IF original_id > 1 BEGIN
+      PATCH_IF NOT (VARIABLE_IS_SET $c0bw_external_projectiles(~%original_id%~)) BEGIN
+        SPRINT original_projectile $c0bw_song_donors(~%original_id%~)
+        INNER_ACTION BEGIN
+          OUTER_SPRINT private_projectile $c0bw_private_names(~%slot%~)
+          OUTER_SET slot += 1
+          COPY_EXISTING ~%original_projectile%.PRO~ ~override/%private_projectile%.PRO~
+            WRITE_LONG 0x0c (THIS BOR 0x40)
+          LAF c0bw_append_projectile INT_VAR projectile_base
+            STR_VAR symbol = EVAL ~%private_projectile%~
+            RET projectile_base projectile
+          END
+          OUTER_SET $c0bw_external_projectiles(~%original_id%~) = projectile
+        END
+      END
+      WRITE_SHORT (header + 0x26) $c0bw_external_projectiles(~%original_id%~)
+    END
+  END
+END
+
+// Register known finite songs by resref. The source payload contributes its
+// effects. This component owns every payload projectile and the controller.
+DEFINE_ACTION_FUNCTION c0bw_wrap_song
+  INT_VAR payload_projectile = 1 preserve_projectiles = 0 templates_ready = 0 c0bardso = 0
+  STR_VAR bardsong_name = "" controller_pulse = "" stock_profile = ""
+  RET song_name c0bardso payload_projectile
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  OUTER_SPRINT song_name ""
+  OUTER_SET source_song_valid = 0
+  OUTER_SET profiles_ready = 1
+  OUTER_SET core_pending = 0
+  OUTER_SET controller_projectile = c0bardso
+  ACTION_IF FILE_EXISTS_IN_GAME ~%bardsong_name%.SPL~ AND FILE_EXISTS_IN_GAME ~C0BARDX.SPL~ BEGIN
+    COPY_EXISTING ~%bardsong_name%.SPL~ ~override~
+      LPM c0bw_guard_spl
+      SET source_song_valid = c0bw_valid AND SHORT_AT 0x68 > 0
+    BUT_ONLY
+    COPY_EXISTING ~C0BARDX.SPL~ ~override~
+      LPM c0bw_guard_song_loader
+      SET source_song_valid = source_song_valid AND c0bw_valid
+    BUT_ONLY
+  END
+  // Individual callers may use the wrapper outside the #2004 batch.
+  ACTION_IF source_song_valid AND NOT templates_ready BEGIN
+    LAF c0bw_resolve_wrapper_templates RET templates_ready controller_pulse RET_ARRAY c0bw_damaged_resources END
+  END
+  ACTION_IF source_song_valid AND templates_ready BEGIN
+    // The loader can take this link. Stage only the profiles this song needs.
+    ACTION_IF NOT c0bardso OR NOT payload_projectile BEGIN
+      ACTION_IF NOT c0bardso BEGIN OUTER_SET $c0bw_batch_assets(C0BARDSO) = 1 END
+      ACTION_IF NOT payload_projectile BEGIN OUTER_SET $c0bw_batch_assets(~%stock_profile%~) = 1 END
+      LAF c0bw_plan_core_projectiles STR_VAR stock_profile RET profiles_ready core_base core_end
+        RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
+          c0bw_resolved_projectiles c0bw_damaged_resources
+      END
+      ACTION_IF profiles_ready BEGIN
+        OUTER_SET core_pending = 1
+        ACTION_IF NOT c0bardso BEGIN OUTER_SET controller_projectile = $c0bw_core_bindings(C0BARDSO) END
+        ACTION_IF NOT payload_projectile AND VARIABLE_IS_SET $c0bw_core_bindings(~%stock_profile%~) BEGIN
+          OUTER_SET payload_projectile = $c0bw_core_bindings(~%stock_profile%~)
+        END
+      END
+    END
+  END
+  ACTION_IF source_song_valid AND templates_ready AND profiles_ready BEGIN
+    OUTER_PATCH ~~ BEGIN
+      LPF GET_UNIQUE_FILE_NAME STR_VAR extension = ~SPL~ base = EVAL ~%bardsong_name%~ RET song_name = filename END
+      INNER_PATCH_SAVE song_name ~%song_name%~ BEGIN
+        REPLACE_TEXTUALLY CASE_INSENSITIVE EXACT_MATCH ~__~ ~C0BW~
+      END
+    END
+
+    // Stage the entire chain in WeiDU memory before replacing a song or
+    // promoting any caller. The payload and EFF share the allocated resref.
+    COPY_EXISTING - ~%bardsong_name%.SPL~ ~.../c0bw-inlined/payload.spl~
+      SET payload_ready = 0
+      PATCH_IF preserve_projectiles BEGIN
+        LPF c0bw_check_song_projectiles INT_VAR require_save_flag = 0
+          RET payload_ready = projectiles_ready donor_count
+          RET_ARRAY c0bw_song_donors c0bw_damaged_resources
+        END
+      END ELSE PATCH_IF payload_projectile >= 1 AND payload_projectile <= 0xFFFF BEGIN
+        LPF ALTER_SPELL_HEADER INT_VAR projectile = payload_projectile END
+        LPF c0bw_check_song_projectiles INT_VAR core_pending RET payload_ready = projectiles_ready RET_ARRAY c0bw_damaged_resources END
+      END
+      LPF c0bw_alter_song_effects
+        STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~
+      END
+
+    COPY_EXISTING - ~C0BARDSO.EFF~ ~.../c0bw-inlined/pulse.eff~
+      WRITE_ASCIIE 0x30 ~%song_name%~ (8)
+      READ_ASCII 0x30 cast_ref (8) NULL
+      SET pulse_ready = LONG_AT 0x10 = 146 AND ~%cast_ref%~ STRING_EQUAL_CASE ~%song_name%~
+
+    COPY_EXISTING - ~C0BARDSO.SPL~ ~.../c0bw-inlined/controller.spl~
+      LPF c0bw_bind_controller_pulse STR_VAR controller_pulse pulse = EVAL ~%song_name%~ RET controller_ready = pulse_ready END
+      SET controller_pro_ready = 0
+      PATCH_IF controller_projectile >= 1 AND controller_projectile <= 0xFFFF BEGIN
+        LPF ALTER_SPELL_HEADER INT_VAR projectile = controller_projectile END
+        LPF c0bw_check_song_projectiles INT_VAR core_pending RET controller_pro_ready = projectiles_ready RET_ARRAY c0bw_damaged_resources END
+      END
+
+    OUTER_SET ids_ready = 1
+    ACTION_IF preserve_projectiles AND payload_ready AND donor_count > 0 BEGIN
+      LAF c0bw_read_projectile_index RET projectile_base index_ready has_missile
+        RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+      END
+      ACTION_IF core_pending AND core_end > projectile_base BEGIN
+        OUTER_SET projectile_base = core_end
+      END
+      LAF c0bw_check_projectile_capacity INT_VAR donor_count projectile_base index_ready has_missile
+        RET ids_ready projectile_base
+      END
+      ACTION_IF ids_ready BEGIN
+        LAF c0bw_plan_private_projectiles INT_VAR donor_count has_missile RET_ARRAY c0bw_private_names END
+      END
+      ACTION_IF NOT ids_ready BEGIN
+        PRINT ~Bardic Wonders #2004: no projectile IDs available for %bardsong_name%.SPL.~
+      END
+    END
+    ACTION_IF NOT (payload_ready AND pulse_ready AND controller_ready AND controller_pro_ready) BEGIN
+      PRINT ~Bardic Wonders #2004: skipping wrapper for %bardsong_name%.SPL with incomplete pulse delivery.~
+    END
+    ACTION_IF NOT (payload_ready AND pulse_ready AND controller_ready AND controller_pro_ready AND ids_ready) BEGIN
+      OUTER_SPRINT song_name ""
+    END
+  END
+
+  ACTION_IF ~%song_name%~ STRING_COMPARE ~~ BEGIN
+    ACTION_IF core_pending BEGIN
+      LAF c0bw_commit_core_projectiles END
+    END
+    OUTER_SET c0bardso = controller_projectile
+    COPY_EXISTING ~C0BARDX.SPL~ ~override~
+      LPF c0bw_extend_song_effects
+        STR_VAR resource = EVAL ~%song_name%~
+        RET_ARRAY c0bw_damaged_resources
+      END
+
+    // Symphony restores and links its own HLA from the resolved template.
+    COPY_EXISTING_REGEXP GLOB ~.*[.]spl~ ~override~
+      PATCH_IF NOT (~%bardsong_name%~ STRING_EQUAL_CASE ~C0ABETS2~
+        AND ~%SOURCE_RES%~ STRING_EQUAL_CASE ~C0ABETHL~) BEGIN
+        LPM c0bw_guard_spl
+        PATCH_IF c0bw_valid BEGIN
+          LPF c0bw_add_assignment_links INT_VAR external = preserve_projectiles
+            STR_VAR bardsong_name song_name RET_ARRAY c0bw_damaged_resources
+          END
+        END
+      END
+    BUT_ONLY
+
+    COPY ~.../c0bw-inlined/payload.spl~ ~override/%song_name%.SPL~
+      PATCH_IF preserve_projectiles BEGIN LPF c0bw_register_external_projectiles INT_VAR projectile_base END END
+    COPY ~.../c0bw-inlined/pulse.eff~ ~override/%song_name%.EFF~
+    COPY ~.../c0bw-inlined/controller.spl~ ~override/%bardsong_name%.SPL~
+
+    ACTION_FOR_EACH baldur_script IN baldur bdbaldur baldur25 BEGIN
+      ACTION_IF FILE_EXISTS_IN_GAME ~%baldur_script%.BCS~ BEGIN
+        EXTEND_TOP ~%baldur_script%.BCS~ ~%MOD_FOLDER%/bardsong/script/baldur.baf~ EVAL
+      END
+    END
+  END
+END
+
+// Snapshot the eligible source SPLs before generating any owned payloads.
+// Discovery is independent of how a song is assigned, including through EFFs.
+DEFINE_ACTION_FUNCTION c0bw_find_external_songs
+  RET_ARRAY c0bw_eligible_songs c0bw_damaged_resources
+BEGIN
+  ACTION_CLEAR_ARRAY c0bw_eligible_songs
+
+  // The stock modal and these kit songs already have dedicated continuous delivery.
+  ACTION_FOR_EACH song IN BARDSONG C0BARDSO C0BLDSO C0DANCSO C0DANCS2 C0STRASO BEGIN
+    OUTER_SET $c0bw_owned_songs(~%song%~) = 1
+  END
+  ACTION_IF GAME_IS ~iwdee~ BEGIN
+    ACTION_FOR_EACH song IN SPCL115 SPCL116 SPCL117 SPCL118 SPCL119 SPCL120 SPCL542A SPCL751A SPCL920A BEGIN
+      OUTER_SET $c0bw_owned_songs(~%song%~) = 1
+    END
+  END
+
+  COPY_EXISTING_REGEXP GLOB ~.*[.]spl~ ~override~
+    SPRINT song ~%SOURCE_RES%~
+    TO_UPPER song
+    LPM c0bw_guard_spl
+    PATCH_IF c0bw_valid AND NOT (VARIABLE_IS_SET $c0bw_owned_songs(~%song%~)) BEGIN
+      READ_BYTE 0x1C spell_type
+      PATCH_IF spell_type = 5 BEGIN
+        SET has_song_icon = 0
+        SET has_self_movement = 0
+        READ_LONG 0x64 ability_table
+        READ_SHORT 0x68 ability_count
+        READ_LONG 0x6A effect_table
+        FOR (ability_index = 0; ability_index < ability_count; ++ability_index) BEGIN
+          SET ability = ability_table + 0x28 * ability_index
+          READ_SHORT (ability + 0x1E) effect_count
+          READ_SHORT (ability + 0x20) first_effect
+          FOR (index = first_effect; index < first_effect + effect_count; ++index) BEGIN
+            SET effect = effect_table + 0x30 * index
+            READ_SHORT effect opcode
+            PATCH_IF opcode = 142 AND SHORT_AT (effect + 0x08) = 40 BEGIN
+              SET has_song_icon = 1
+            END
+            // The original check read the target and power as one word.
+            PATCH_IF opcode = 126 AND SHORT_AT (effect + 0x02) = 1 BEGIN
+              SET has_self_movement = 1
+            END
+          END
+        END
+        PATCH_IF has_song_icon AND NOT has_self_movement BEGIN
+          DEFINE_ASSOCIATIVE_ARRAY c0bw_eligible_songs BEGIN ~%song%~ => 1 END
+        END
+      END
+    END
+  BUT_ONLY
+END
+
+DEFINE_ACTION_FUNCTION c0bw_wrap_external_songs
+  INT_VAR c0bardso = 0
+  STR_VAR controller_pulse = ""
+  RET external_wrappers
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  OUTER_SET external_wrappers = 0
+  ACTION_PHP_EACH c0bw_eligible_songs AS song => unused BEGIN
+    LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1 templates_ready = 1 c0bardso
+      STR_VAR controller_pulse bardsong_name = EVAL ~%song%~
+      RET wrapped_song = song_name c0bardso
+      RET_ARRAY c0bw_damaged_resources
+    END
+    ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN
+      OUTER_SET external_wrappers += 1
+    END
+  END
+END

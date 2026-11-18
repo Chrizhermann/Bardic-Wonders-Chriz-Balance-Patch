@@ -294,3 +294,11 @@ END
       ACTION_IF ("kit" = 2) THEN BEGIN
       END
       END
+
+
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSPA~ RET song_projectile = projectile END
+ACTION_FOR_EACH song IN C0TRBSO C0TRBSO2 BEGIN
+  COPY_EXISTING ~%song%.SPL~ ~override~
+    LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+END

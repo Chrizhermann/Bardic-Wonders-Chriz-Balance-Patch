@@ -231,3 +231,11 @@ SAY UNIDENTIFIED_DESC ~Swift-As-Flowing-Water
 This oriental dance is a powerful aid to both the Dancer and to <PRO_HISHER> allies. The song gives the Dancer a +10 bonus to Armor Class as well as the ability to move at a reduced pace. The song also gives <PRO_HISHER> allies +5 to hit and damage as well as one extra attack per round and increased movement rate. There is also a 5% chance each round that any affected party member may gain the effects of Adrenaline Rush.
 
 This ability replaces the current Bard Song.~
+
+
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSPA~ RET song_projectile = projectile END
+ACTION_FOR_EACH song IN C0DANCSO C0DANCS2 BEGIN
+  COPY_EXISTING ~%song%.SPL~ ~override~
+    LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+END

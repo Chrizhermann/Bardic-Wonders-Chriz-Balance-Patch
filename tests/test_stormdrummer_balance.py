@@ -32,7 +32,7 @@ class StormDrummerBalanceTests(unittest.TestCase):
         result = subprocess.run(
             [
                 str(ROOT / "Setup-BardicWonders.exe"),
-                "--no-auto-tp2", "--noautoupdate", "--nogame",
+                "--no-auto-tp2", "--noautoupdate", "--game", str(root),
                 "--search", "override", "--tlkin", "dialog.tlk",
                 "--tlkout", "dialog.tlk", "--no-exit-pause",
                 "--language", "0", f"--force-{operation}", "0",
@@ -56,6 +56,9 @@ class StormDrummerBalanceTests(unittest.TestCase):
             root = Path(directory)
             fixture = root / "testmod"
             shutil.copytree(STORM, fixture / "storm")
+            shutil.copytree(MOD / "bardsong/projectiles", fixture / "bardsong/projectiles")
+            (fixture / "lib").mkdir()
+            shutil.copy2(MOD / "lib/song_projectile.tpa", fixture / "lib")
             before_fixture = file_snapshot(fixture / "storm")
             override = root / "override"
             override.mkdir()
@@ -63,7 +66,10 @@ class StormDrummerBalanceTests(unittest.TestCase):
             previous[-1] ^= 0x5A
             (override / "c0sdrum4.spl").write_bytes(previous)
             (override / "unrelated.txt").write_bytes(b"Preserve this fixture resource.\n")
+            (override / "PROJECTL.IDS").write_text("IDS V1.0\n159 INAREANP\n")
+            (override / "MISSILE.IDS").write_text("IDS V1.0\n0 NONE\n")
             before_override = file_snapshot(override)
+            (root / "chitin.key").write_bytes(b"KEY V1  " + struct.pack("<IIII", 0, 0, 24, 24))
             (root / "dialog.tlk").write_bytes(tlk_with_original_description())
             (fixture / "setup-test.tp2").write_text(
                 "BACKUP ~testmod/backup~\nAUTHOR ~test~\n"
@@ -158,9 +164,13 @@ class StormDrummerBalanceTests(unittest.TestCase):
                     # The existing installer assigns names/descriptions here.
                     for offset in (0x08, 0x0C, 0x50):
                         expected[offset : offset + 4] = actual[offset : offset + 4]
+                if path.name.lower() in ("c0sdrus2.spl", "c0sdruso.spl"):
+                    start, count = struct.unpack_from("<IH", expected, 0x64)
+                    for index in range(count):
+                        struct.pack_into("<H", expected, start + index * 0x28 + 0x26, 161)
                 self.assertEqual(expected, actual, path.name)
             self.assertEqual(
-                {path.name.lower() for path in STORM.iterdir()} | {"unrelated.txt"},
+                {path.name.lower() for path in STORM.iterdir()} | {"unrelated.txt", "projectl.ids", "missile.ids", "c0bwsnp.pro"},
                 {path.name.lower() for path in override.iterdir()},
             )
 

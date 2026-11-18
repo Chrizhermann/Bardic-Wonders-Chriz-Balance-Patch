@@ -88,6 +88,16 @@ shared-ability and Abettor playtesting on 16 September 2026 and approved release
 That broad playtest does not separately establish the opening/finale party
 invisibility tracked in issue #5. The Darkbloom Spell Revisions exclusion still applies.
 
+## Version v2.9c-balance.9
+
+Recurring songs, Inspirations and passive kit effects use save-compatible
+projectiles. The Bard Song Mechanics Tweak preserves eligible third-party
+songs and IWD:EE's native modal songs. A usable Abettor Symphony retains
+its HLA grant when the optional Invisibility cue is unavailable. The
+standalone Abettor tail remains at 1.2.0. See the
+[release notes](docs/releases/v2.9c-balance.9.md) for the affected kits,
+installation and verification. Live in-game testing is pending.
+
 ## Version v2.9c-balance.8
 
 This release changes **Darkbloom (1006)**, **Troubadour (1008)**,

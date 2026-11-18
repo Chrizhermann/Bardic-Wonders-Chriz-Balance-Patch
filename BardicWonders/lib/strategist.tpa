@@ -187,6 +187,17 @@ LAF cd_new_portrait_icon INT_VAR string = RESOLVE_STR_REF(~Combination Tactics~)
 LAF cd_new_portrait_icon INT_VAR string = RESOLVE_STR_REF(~Counterattack Gambit~) STR_VAR bam_file = C0STRA5I RET C0STRA5I = icon END
 
 ADD_PROJECTILE ~%MOD_FOLDER%/strategist/spells/c0strapr.PRO~ ~C0 STRATEGIST PROJECTILE~
+COPY ~%MOD_FOLDER%/strategist/spells/c0strapr.PRO~ ~override~
+
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0AKSVA~ RET prowess_projectile = projectile END
+ACTION_FOR_EACH pulse IN C0STRA0B C0STRA0C C0STRA0D C0STRA0E BEGIN
+  COPY_EXISTING ~%pulse%.SPL~ ~override~
+    LPF ALTER_SPELL_HEADER INT_VAR projectile = prowess_projectile END
+END
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSS~ RET tactics_projectile = projectile END
+COPY_EXISTING ~C0STRA3A.SPL~ ~override~
+  LPF ALTER_SPELL_HEADER INT_VAR projectile = tactics_projectile END
   
 COPY_EXISTING ~C0STRASO.SPL~ OVERRIDE
 LPF ALTER_EFFECT INT_VAR match_opcode = 142 parameter2 = C0STRASI END

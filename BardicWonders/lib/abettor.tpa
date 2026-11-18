@@ -192,10 +192,14 @@ SAY NAME2 ~Embrace the Shadow~
 SAY UNIDENTIFIED_DESC ~Embrace the Shadow
 Gaining the favor of the Lord of Shadows has its advantages. The Abettor of Mask permanently gains a +1 bonus to Dexterity and Luck and becomes immune to poison and backstabs. <PRO_HISHER> backstab multiplier is also increased by one point.~
 
+INCLUDE ~%MOD_FOLDER%/lib/abettor_symphony.tpa~
 COPY ~%MOD_FOLDER%/abettor/c0abethl.spl~ ~override~
-SAY NAME1 ~Symphony of the Dark Children~
-SAY NAME2 ~Symphony of the Dark Children~
-SAY UNIDENTIFIED_DESC ~Symphony of the Dark Children
-The Abettor's song grants all affected party members +70% to all thieving skills, passive trap detection, Blur, a +3 bonus to Armor Class, a +1 bonus to all Saving Throws, and Non-Detection. The Abettor also gains Improved Invisibility for one round with each song pulse. All affected party members become invisible for one round when the song begins and for one round when the song ends. This is ordinary Invisibility and ends if the recipient attacks or casts a spell.
+  LPF c0bw_describe_symphony END
 
-This ability replaces the current Bard Song.~
+
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSPA~ RET song_projectile = projectile END
+ACTION_FOR_EACH song IN C0ABETSO C0ABETS2 BEGIN
+  COPY_EXISTING ~%song%.SPL~ ~override~
+    LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+END

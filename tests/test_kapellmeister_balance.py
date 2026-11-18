@@ -35,7 +35,7 @@ class KapellmeisterBalanceTests(unittest.TestCase):
         shutil.copytree(MOD / "Kapellmeister", fixture / "Kapellmeister")
         shutil.copytree(MOD / "bardsong", fixture / "bardsong")
         (fixture / "lib").mkdir()
-        for name in ("functions.tph", "kapellmeister_balance.tpa"):
+        for name in ("functions.tph", "kapellmeister_balance.tpa", "song_projectile.tpa"):
             shutil.copy2(MOD / "lib" / name, fixture / "lib" / name)
         self.sources_before = file_snapshot(fixture)
         self.donors_before = file_snapshot(SPELLS)
@@ -51,6 +51,8 @@ class KapellmeisterBalanceTests(unittest.TestCase):
         previous[-1] ^= 0x5A
         (self.override / "C0KM#SOH.SPL").write_bytes(previous)
         (self.override / "UNRELATED.TXT").write_bytes(b"Keep this resource.\x00\xff")
+        (self.override / "PROJECTL.IDS").write_text("IDS V1.0\n155 INAREAPA\n156 C0BWSPA\n")
+        (self.override / "MISSILE.IDS").write_text("IDS V1.0\n0 NONE\n")
         self.before = file_snapshot(self.override)
         source = (MOD / "lib" / "kapellmeister.tpa").read_text(encoding="utf-8")
         # Run every production resource COPY/patch/SAY. Only ADD_KIT_EX is
@@ -60,9 +62,15 @@ class KapellmeisterBalanceTests(unittest.TestCase):
         self.assertTrue(actions.rstrip().endswith(
             "INCLUDE ~%MOD_FOLDER%/lib/kapellmeister_balance.tpa~"
         ))
-        transform = (MOD / "lib" / "bardsongtweaks.tpa").read_text(encoding="utf-8")
-        transform = transform[transform.index("COPY_EXISTING_REGEXP GLOB"):
-                              transform.index("INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~")]
+        shutil.copy2(MOD / "lib/bardsong_registration.tpa", fixture / "lib")
+        self.sources_before = file_snapshot(fixture)
+        transform = (
+            "INCLUDE ~BardicWonders/lib/bardsong_registration.tpa~\n"
+            'ACTION_FOR_EACH song IN C0KM#SO C0KM#SOH BEGIN\n'
+            '  LAF c0bw_wrap_song INT_VAR payload_projectile = 157 '
+            'STR_VAR bardsong_name = EVAL ~%song%~ END\n'
+            'END\n'
+        )
         (self.game / "test.tp2").write_text(
             "BACKUP ~backup~\nAUTHOR ~test~\n"
             "ALWAYS\nOUTER_SPRINT MOD_FOLDER ~BardicWonders~\n"
@@ -141,7 +149,13 @@ class KapellmeisterBalanceTests(unittest.TestCase):
         changed = {"C0KM#H1.SPL", "C0KM#H2.SPL", "C0KM#H3.SPL", "C0KM#H4.SPL",
                    "C0KM#S0.SPL", "C0KM#SO3.SPL", "C0KM#SO4.SPL", "C0KM#01A.SPL", "C0KM#SOH.SPL"}
         for donor in SPELLS.iterdir():
-            if donor.name.upper() not in changed:
+            if donor.name.upper() == "C0KM#SO.SPL":
+                expected = bytearray(donor.read_bytes())
+                start, count = struct.unpack_from("<IH", expected, 0x64)
+                for i in range(count):
+                    struct.pack_into("<H", expected, start + 0x28 * i + 0x26, 157)
+                self.assertEqual(expected, (self.override / donor.name).read_bytes())
+            elif donor.name.upper() not in changed:
                 self.assertEqual(donor.read_bytes(), (self.override / donor.name).read_bytes(), donor.name)
         donor = parse_spl(SPELLS / "C0KM#SOH.SPL")
         actual = self.spell("C0KM#SOH")

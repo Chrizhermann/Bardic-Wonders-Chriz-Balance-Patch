@@ -11,7 +11,7 @@ import unittest
 
 from .ie_resources import SYNTHETIC_KEY, parse_spl, read_controller_payload
 from .test_patcher import effect_bytes, legacy_mutable_effects, spell_bytes
-from .test_weidu_finite_integration import (
+from .finite_fixtures import (
     controller_bytes, finale_effect, is_finale, opening_effect, song_ticks,
 )
 
@@ -279,7 +279,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
 
     def test_current_generated_resources_restore_skipped_hla_and_uninstall_exactly(self) -> None:
         from .generated_fixture import generated_resources
-        from .test_weidu_finite_integration import HLA_TABLE
+        from .finite_fixtures import HLA_TABLE
         for projectile, payload, columns in ((444, "X6SONG", 9), (913, "QZNEW02", 10)):
             with self.subTest(projectile=projectile), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -319,7 +319,7 @@ class TailPatchIntegrationTests(unittest.TestCase):
                 self.assertEqual(before, {p.name: p.read_bytes() for p in override.iterdir()})
 
     def test_invalid_hla_tables_roll_back_all_resources(self) -> None:
-        from .test_weidu_finite_integration import HLA_TABLE
+        from .finite_fixtures import HLA_TABLE
         missing = "\n".join(line for line in HLA_TABLE.splitlines() if "AP_C0ABETHL" not in line) + "\n"
         cases = {
             "unsupported_width": missing.replace("EXCLUDED_BY", "EXCLUDED_BY EXTRA EXTRA2").replace("99         1            *             *", "99         1            *             * * *"),

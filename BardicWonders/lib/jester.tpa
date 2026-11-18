@@ -94,3 +94,16 @@ SAY UNIDENTIFIED_DESC ~The Fool's Journey
 This powerful song greatly enhances the Jester's influence over their foes. The Fool's Journey inflicts a -6 penalty to all enemies' Armor Class, induces a 35% chance to miscast spells, and increases their critical miss modifier by 3. Enemies are also unable to critically hit while under the effects. Additionally, while the Jester is singing, they gain a bonus of 5 to Armor Class, which is doubled to 10 against ranged attacks.
 
 This ability replaces the current Bard Song.~
+
+
+INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~
+LAF c0bw_song_projectile STR_VAR resref = ~C0BWSNP~ RET song_projectile = projectile END
+COPY_EXISTING ~C0JES03A.SPL~ ~override~
+  LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
+
+// The stock IWD Jester song uses a wider enemy-only projectile.
+ACTION_IF GAME_IS ~iwdee~ BEGIN
+  LAF c0bw_song_projectile STR_VAR resref = ~C0BWSIW~ RET song_projectile = projectile END
+END
+COPY_EXISTING ~SPCL751A.SPL~ ~override~
+  LPF ALTER_SPELL_HEADER INT_VAR projectile = song_projectile END
