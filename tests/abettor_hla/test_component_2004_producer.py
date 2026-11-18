@@ -243,7 +243,7 @@ def retarget_controller_fixture(source: bytes, replacement: bytes) -> bytes:
     return bytes(data)
 
 
-def add_controller_cue(source: bytes, name: bytes) -> tuple[bytes, tuple[bytes, ...]]:
+def add_controller_cue(source: bytes, name: bytes, opcodes=(177, 272)) -> tuple[bytes, tuple[bytes, ...]]:
     data = bytearray(source)
     abilities, count, table = struct.unpack_from("<IHI", data, 0x64)
     field = abilities + 40 * (count - 1) + 0x1E
@@ -251,7 +251,7 @@ def add_controller_cue(source: bytes, name: bytes) -> tuple[bytes, tuple[bytes, 
     end = table + 48 * (first + length)
     assert end == len(data)
     cue_records = []
-    for opcode in (177, 272):
+    for opcode in opcodes:
         donor = next(bytes(data[offset:offset + 48]) for offset in range(table + 48 * first, end, 48)
                      if struct.unpack_from("<H", data, offset)[0] == opcode)
         cue = donor[:0x14] + name + donor[0x1C:]
@@ -1180,6 +1180,104 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertFalse(any(path.name.upper().startswith("C0P") and path.suffix.upper() == ".PRO"
                                  for path in override.iterdir()))
             self.assertEqual(second_donor, (override / "XQBADPRO.PRO").read_bytes())
+
+    def test_external_projectile_allocation_preserves_occupied_unsorted_ids(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(
+                b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n"
+                b"524 XQTAKEN\r\n523 C0BWSNP\r\n"
+            )
+            foreign = bytearray((MOD / "bardsong/c0bardx.spl").read_bytes())
+            ability, = struct.unpack_from("<I", foreign, 0x64)
+            struct.pack_into("<H", foreign, ability + 0x26, 525)
+            old_spell = override / "XQOLD.SPL"
+            old_spell.write_bytes(foreign)
+            old_projectile = override / "XQTAKEN.PRO"
+            before = resource(override, "INAREAPA.PRO").read_bytes()
+            old_projectile.write_bytes(before)
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            rows = [line.split() for line in ids.read_text().splitlines()[1:] if line.strip()]
+            self.assertEqual([["524", "XQTAKEN"]], [row for row in rows if row[0] == "524"])
+            self.assertEqual(["525", "C0P0"], rows[-1])
+            self.assertEqual(foreign, old_spell.read_bytes())
+            self.assertEqual(before, old_projectile.read_bytes())
+            pulse = parse_spl(song).find_effects(opcode=272)[0].resource
+            self.assertEqual(526, parse_spl(resource(override, f"{pulse}.SPL")).abilities[0].projectile)
+            self.assertTrue(resource(override, "C0P0.PRO").read_bytes()[0x0C] & 0x40)
+
+    def test_unsorted_projectile_capacity_reads_hex_and_reserved_rows(self) -> None:
+        for occupied in (b"65534 XQTAKEN", b"0xFFFE XQTAKEN", b"0xfffe"):
+            with self.subTest(occupied=occupied), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                override = root / "override"
+                song, _ = self.seed_external_song_and_bard_text(override)
+                before = song.read_bytes()
+                ids = resource(override, "PROJECTL.IDS")
+                original = (b"IDS V1.0\r\n\r\n157 INAREAPA\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n"
+                            + occupied + b"\r\n523 C0BWSNP\r\n")
+                ids.write_bytes(original)
+                missile = resource(override, "MISSILE.IDS")
+                original_missile = missile.read_bytes()
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(1, result.stdout.upper().count("NO PROJECTILE IDS AVAILABLE FOR XQSONG.SPL"))
+                self.assertEqual(before, song.read_bytes())
+                self.assertEqual(original, ids.read_bytes())
+                self.assertEqual(original_missile, missile.read_bytes())
+                self.assertFalse(list(override.glob("C0P*.PRO")))
+
+    def test_stock_projectiles_append_above_hex_id_and_keep_missile_labels(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(b"IDS V1.0\r\n157 INAREAPA\r\n0x20c XQTAKEN\r\n523 LAST\r\n")
+            missile = resource(override, "MISSILE.IDS")
+            missile.write_bytes(b"IDS V1.0\r\n525 Taken label\r\n523 Last label\r\n")
+            (override / "FIREBALL.IDS").write_bytes(b"IDS V1.0\r\n0 NONE\r\n")
+            self.seed_external_song_and_bard_text(override)
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(["525 C0BARDSO", "526 C0BWSPA", "527 C0BWSNP", "528 C0P0"],
+                             ids.read_text().splitlines()[-4:])
+            self.assertEqual(["526 C0 Bardsong", "527 C0BWSPA", "528 C0BWSNP", "529 C0P0"],
+                             missile.read_text().splitlines()[-4:])
+            self.assertIn("525 Taken label", missile.read_text().splitlines())
+
+    def test_fallback_excludes_one_shot_cast_cue_from_repeat_candidates(self) -> None:
+        for cue_opcodes in ((177,), (177, 272)):
+            with self.subTest(cue_opcodes=cue_opcodes), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                override = root / "override"
+                packaged = root / "testmod/bardsong/c0bardso.spl"
+                controller = retarget_controller_fixture(packaged.read_bytes(), b"PREVPULS")
+                controller, cue = add_controller_cue(controller, b"XQCUEREF", opcodes=cue_opcodes)
+                (override / "C0BARDSO.SPL").write_bytes(controller)
+                cast_eff = (root / "testmod/bardsong/c0bardso.EFF").read_bytes()
+                for name in ("PREVPULS", "XQCUEREF"):
+                    (override / f"{name}.EFF").write_bytes(cast_eff)
+                packaged.write_bytes(b"SPL V1  ")
+                if 272 in cue_opcodes:
+                    self.assert_rejected_delivery_fallback(root, "C0BARDSO.SPL")
+                    continue
+                song, _ = self.seed_external_song_and_bard_text(override)
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(cue, effect_records(song)[1][-1][-len(cue):])
+                self.assertEqual(cast_eff, (override / "XQCUEREF.EFF").read_bytes())
+                self.assertNotIn(b"PREVPULS", song.read_bytes())
+                pulse = parse_spl(song).find_effects(opcode=272)[0].resource
+                pulse_eff = resource(override, f"{pulse}.EFF")
+                self.assertEqual(146, struct.unpack_from("<I", pulse_eff.read_bytes(), 0x10)[0])
+                self.assertEqual(pulse, read_eff_resource(pulse_eff))
+                self.assertTrue(resource(override, "C0P0.PRO").read_bytes()[0x0C] & 0x40)
+                self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
 
     def test_projectile_donor_requires_all_type_specific_blocks(self) -> None:
         source = (MOD / "bardsong/c0bardso.PRO").read_bytes()

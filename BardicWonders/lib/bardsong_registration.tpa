@@ -170,8 +170,8 @@ DEFINE_PATCH_MACRO c0bw_guard_projectile BEGIN
 END
 
 // The package owns an explicit placeholder. A fallback may point to a
-// previous cast-spell EFF or an unallocated placeholder. Existing cues
-// and other EFFs that cannot cast a spell are never candidates.
+// previous cast-spell EFF or an unallocated placeholder. Only repeating
+// delivery identifies the pulse. One-shot effects and non-cast EFFs don't.
 DEFINE_PATCH_FUNCTION c0bw_find_fallback_pulse
   RET controller_pulse
 BEGIN
@@ -184,8 +184,7 @@ BEGIN
     SET count = $c0bw_count(~%bucket%~)
     FOR (i = 0; i < count; ++i) BEGIN
       SET effect = effect_table + (first + i) * 0x30
-      READ_SHORT effect opcode
-      PATCH_IF opcode = 177 OR opcode = 272 BEGIN
+      PATCH_IF SHORT_AT effect = 272 BEGIN
         READ_ASCII (effect + 0x14) link (8) NULL
         TO_UPPER link
         PATCH_IF ~%link%~ STRING_COMPARE ~~ AND ~%link%~ STRING_COMPARE ~C0SINGIN~
@@ -300,6 +299,80 @@ DEFINE_PATCH_MACRO c0bw_guard_core_asset BEGIN
   END
 END
 
+// Read both reserved numbers and named rows. WeiDU accepts hexadecimal
+// IDs and bare numeric rows, and neither table is guaranteed to be sorted.
+DEFINE_PATCH_FUNCTION c0bw_scan_projectile_ids
+  INT_VAR record_symbols = 0
+  RET max_id
+  RET_ARRAY c0bw_projectile_ids
+BEGIN
+  SET max_id = ~-1~
+  READ_2DA_ENTRIES_NOW numeric_rows 1
+  FOR (row = 0; row < numeric_rows; ++row) BEGIN
+    READ_2DA_ENTRY_FORMER numeric_rows row 0 id
+    PATCH_IF IS_AN_INT id BEGIN
+      PATCH_IF id > max_id BEGIN SET max_id = id END
+    END
+  END
+  PATCH_IF record_symbols BEGIN
+    PATCH_CLEAR_ARRAY c0bw_projectile_ids
+    READ_2DA_ENTRIES_NOW named_rows 2
+    FOR (row = 0; row < named_rows; ++row) BEGIN
+      READ_2DA_ENTRY_FORMER named_rows row 0 id
+      PATCH_IF IS_AN_INT id BEGIN
+        READ_2DA_ENTRY_FORMER named_rows row 1 symbol
+        TO_UPPER symbol
+        SET $c0bw_projectile_ids(~%symbol%~) = id
+      END
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION c0bw_read_projectile_index
+  RET max_projectile max_missile
+  RET_ARRAY c0bw_projectile_ids
+BEGIN
+  OUTER_SET max_projectile = ~-1~
+  OUTER_SET max_missile = ~-1~
+  ACTION_CLEAR_ARRAY c0bw_projectile_ids
+  ACTION_IF FILE_EXISTS_IN_GAME ~PROJECTL.IDS~ BEGIN
+    COPY_EXISTING ~PROJECTL.IDS~ ~override~
+      LPF c0bw_scan_projectile_ids INT_VAR record_symbols = 1
+        RET max_projectile = max_id RET_ARRAY c0bw_projectile_ids
+      END
+    BUT_ONLY
+  END
+  ACTION_IF FILE_EXISTS_IN_GAME ~MISSILE.IDS~ BEGIN
+    COPY_EXISTING ~MISSILE.IDS~ ~override~
+      LPF c0bw_scan_projectile_ids RET max_missile = max_id END
+    BUT_ONLY
+  END
+END
+
+// The caller has reserved the required word-sized projectile fields. Both
+// stock and private PROs append after the whole PROJECTL ID space.
+DEFINE_ACTION_FUNCTION c0bw_append_projectile
+  INT_VAR max_projectile = ~-1~ max_missile = ~-1~
+  STR_VAR symbol = "" missile_name = ""
+  RET max_projectile max_missile projectile
+BEGIN
+  OUTER_SET max_projectile += 1
+  OUTER_SET projectile = max_projectile + 1
+  APPEND ~PROJECTL.IDS~ ~%max_projectile% %symbol%~
+  ACTION_IF FILE_EXISTS_IN_GAME ~MISSILE.IDS~ BEGIN
+    OUTER_SET max_missile += 1
+    // Stock BG2:EE and IWD:EE associate the missile label with the SPL
+    // projectile field. Skip gaps instead of adding WeiDU's dummy rows.
+    // On already divergent lists, preserve existing rows and avoid reuse.
+    ACTION_IF FILE_EXISTS_IN_GAME ~FIREBALL.IDS~ AND max_missile < projectile BEGIN
+      OUTER_SET max_missile = projectile
+    END
+    ACTION_IF ~%missile_name%~ STRING_EQUAL ~~ BEGIN OUTER_SPRINT missile_name ~%symbol%~ END
+    APPEND ~MISSILE.IDS~ ~%max_missile% %missile_name%~
+  END
+  CLEAR_IDS_MAP
+END
+
 DEFINE_ACTION_FUNCTION c0bw_resolve_core_asset
   INT_VAR asset_type = 0 required_eff_opcode = ~-1~
   STR_VAR packaged = "" asset = "" missile_name = ""
@@ -321,9 +394,8 @@ BEGIN
   END ELSE BEGIN
     PRINT ~Bardic Wonders #2004: missing packaged %filename%.~
   END
-  ACTION_IF ready BEGIN
-    COPY ~%packaged%~ ~override/%filename%~
-  END ELSE ACTION_IF FILE_EXISTS_IN_GAME ~%filename%~ BEGIN
+  OUTER_SET use_package = ready
+  ACTION_IF NOT ready AND FILE_EXISTS_IN_GAME ~%filename%~ BEGIN
     OUTER_SET controller_fallback = 1
     COPY_EXISTING ~%filename%~ ~override~
       LPM c0bw_guard_core_asset
@@ -331,17 +403,32 @@ BEGIN
     BUT_ONLY
   END
   ACTION_IF ready AND asset_type = 3 BEGIN
-    // Register already-validated bytes with WeiDU and retain any existing ID.
+    LAF c0bw_read_projectile_index RET max_projectile max_missile RET_ARRAY c0bw_projectile_ids END
+    ACTION_TO_UPPER asset
+    OUTER_SET already_registered = VARIABLE_IS_SET $c0bw_projectile_ids(~%asset%~)
+    ACTION_IF already_registered BEGIN
+      OUTER_SET existing_id = $c0bw_projectile_ids(~%asset%~)
+      OUTER_SET ready = existing_id >= 1 AND existing_id <= 0xFFFE
+    END ELSE BEGIN
+      OUTER_SET ready = max_projectile >= 0 AND max_projectile < 0xFFFE
+    END
+    ACTION_IF NOT ready BEGIN
+      PRINT ~Bardic Wonders #2004: no projectile IDs available for %filename%.~
+    END
+  END
+  ACTION_IF ready AND use_package BEGIN
+    COPY ~%packaged%~ ~override/%filename%~
+  END
+  ACTION_IF ready AND asset_type = 3 BEGIN
+    // Preserve a registered number even when replacing its PRO bytes.
     ACTION_IF NOT FILE_EXISTS ~override/%filename%~ BEGIN
       COPY_EXISTING ~%filename%~ ~override/%filename%~
     END
     COPY_EXISTING ~%filename%~ ~override~
       WRITE_LONG 0x0C (THIS BOR 0x40)
     BUT_ONLY
-    ACTION_IF ~%missile_name%~ STRING_COMPARE ~~ BEGIN
-      ADD_PROJECTILE ~override/%asset%.PRO~ ~%missile_name%~
-    END ELSE BEGIN
-      ADD_PROJECTILE ~override/%asset%.PRO~
+    ACTION_IF NOT already_registered BEGIN
+      LAF c0bw_append_projectile INT_VAR max_projectile max_missile STR_VAR symbol = EVAL ~%asset%~ missile_name END
     END
   END
 END
@@ -681,31 +768,21 @@ END
 
 DEFINE_ACTION_FUNCTION c0bw_check_projectile_capacity
   INT_VAR donor_count = 0
-  RET ids_ready
+  RET ids_ready max_projectile max_missile
 BEGIN
-  OUTER_SET ids_ready = donor_count = 0
+  OUTER_SET ids_ready = 1
+  OUTER_SET max_projectile = ~-1~
+  OUTER_SET max_missile = ~-1~
   ACTION_IF donor_count > 0 BEGIN
-    COPY_EXISTING ~PROJECTL.IDS~ ~override~
-      // ADD_PROJECTILE increments the last numeric row. Its SPL field is
-      // one greater than the IDS number and must also fit in a word.
-      SET row = RINDEX_BUFFER (~[%WNL%][0-9]~)
-      PATCH_IF row >= 0 BEGIN
-        SET number_start = row + 1
-        SET space = INDEX_BUFFER (~[%WNL%%TAB% ]~ number_start)
-        PATCH_IF space > number_start BEGIN
-          READ_ASCII number_start last_entry (space - number_start)
-          PATCH_IF IS_AN_INT ~%last_entry%~ BEGIN
-            SET ids_ready = last_entry >= 0 AND last_entry <= 0xFFFE - donor_count
-          END
-        END
-      END
-    BUT_ONLY
+    LAF c0bw_read_projectile_index RET max_projectile max_missile END
+    OUTER_SET ids_ready = max_projectile >= 0 AND max_projectile <= 0xFFFE - donor_count
   END
 END
 
 // The entire plan has passed validation. Share a private copy among all
 // abilities that had the same donor ID.
 DEFINE_PATCH_FUNCTION c0bw_register_external_projectiles
+  INT_VAR max_projectile = ~-1~ max_missile = ~-1~
 BEGIN
   PATCH_CLEAR_ARRAY c0bw_external_projectiles
   GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
@@ -724,8 +801,11 @@ BEGIN
           OUTER_SET c0bw_projectile_serial += 1
           COPY_EXISTING ~%original_projectile%.PRO~ ~override/%private_projectile%.PRO~
             WRITE_LONG 0x0c (THIS BOR 0x40)
-          ADD_PROJECTILE ~override/%private_projectile%.PRO~
-          OUTER_SET $c0bw_external_projectiles(~%original_id%~) = IDS_OF_SYMBOL (~PROJECTL~ ~%private_projectile%~) + 1
+          LAF c0bw_append_projectile INT_VAR max_projectile max_missile
+            STR_VAR symbol = EVAL ~%private_projectile%~
+            RET max_projectile max_missile projectile
+          END
+          OUTER_SET $c0bw_external_projectiles(~%original_id%~) = projectile
         END
       END
       WRITE_SHORT (header + 0x26) $c0bw_external_projectiles(~%original_id%~)
@@ -797,7 +877,7 @@ BEGIN
 
     OUTER_SET ids_ready = 1
     ACTION_IF preserve_projectiles AND payload_ready BEGIN
-      LAF c0bw_check_projectile_capacity INT_VAR donor_count RET ids_ready END
+      LAF c0bw_check_projectile_capacity INT_VAR donor_count RET ids_ready max_projectile max_missile END
       ACTION_IF NOT ids_ready BEGIN
         PRINT ~Bardic Wonders #2004: no projectile IDs available for %bardsong_name%.SPL.~
       END
@@ -831,7 +911,7 @@ BEGIN
     BUT_ONLY
 
     COPY ~.../c0bw-inlined/payload.spl~ ~override/%song_name%.SPL~
-      PATCH_IF preserve_projectiles BEGIN LPF c0bw_register_external_projectiles END END
+      PATCH_IF preserve_projectiles BEGIN LPF c0bw_register_external_projectiles INT_VAR max_projectile max_missile END END
     COPY ~.../c0bw-inlined/pulse.eff~ ~override/%song_name%.EFF~
     COPY ~.../c0bw-inlined/controller.spl~ ~override/%bardsong_name%.SPL~
 
