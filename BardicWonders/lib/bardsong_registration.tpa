@@ -299,119 +299,99 @@ DEFINE_PATCH_MACRO c0bw_guard_core_asset BEGIN
   END
 END
 
-// Lex the scratch copy before reading IDS rows. In WeiDU 249, a line
-// comment ends at LF, while block comments nest and ignore line markers.
-DEFINE_PATCH_FUNCTION c0bw_strip_ids_comments
-  RET ids_complete
-BEGIN
-  SET cursor = 0
-  SET comment_depth = 0
-  SET state = 0
-  WHILE state != 3 BEGIN
-    PATCH_MATCH state WITH
-      0 BEGIN // NORMAL
-        SET comment_start = ~-1~
-        PATCH_IF cursor < BUFFER_LENGTH BEGIN SET comment_start = INDEX_BUFFER (~//\|/\*~ cursor) END
-        PATCH_IF comment_start < 0 BEGIN
-          SET state = 3
-        END ELSE BEGIN
-          SET cursor = comment_start + 2
-          PATCH_IF BYTE_AT (comment_start + 1) = 0x2F BEGIN
-            SET state = 1
-          END ELSE BEGIN
-            SET state = 2
-            SET comment_depth = 1
-          END
-        END
-      END
-      1 BEGIN // LINE_COMMENT
-        SET comment_end = BUFFER_LENGTH
-        PATCH_IF cursor < BUFFER_LENGTH BEGIN
-          SET newline = INDEX_BUFFER (EXACT_MATCH ~%LNL%~ cursor)
-          PATCH_IF newline >= 0 BEGIN SET comment_end = newline END
-        END
-        DELETE_BYTES comment_start (comment_end - comment_start - 1)
-        WRITE_BYTE comment_start 0x20
-        SET cursor = comment_start + 1
-        SET state = 0
-      END
-      2 BEGIN // BLOCK_COMMENT
-        SET marker = ~-1~
-        PATCH_IF cursor < BUFFER_LENGTH BEGIN SET marker = INDEX_BUFFER (~/\*\|\*/~ cursor) END
-        PATCH_IF marker < 0 BEGIN
-          SET state = 3
-        END ELSE BEGIN
-          SET cursor = marker + 2
-          PATCH_IF BYTE_AT marker = 0x2F BEGIN
-            SET comment_depth += 1
-          END ELSE BEGIN
-            SET comment_depth -= 1
-            PATCH_IF comment_depth = 0 BEGIN
-              // A comment between tokens is whitespace, including when
-              // the block itself spans multiple physical lines.
-              DELETE_BYTES comment_start (cursor - comment_start - 1)
-              WRITE_BYTE comment_start 0x20
-              SET cursor = comment_start + 1
-              SET state = 0
-            END
-          END
-        END
-      END
-      DEFAULT SET state = 3
-    END
-  END
-  SET ids_complete = comment_depth = 0
-END
-
-// Skip header text and a leading standalone entry count. Numeric-only
-// rows after the header still reserve their IDs, as WeiDU's aligner does.
+// Scan the IDS token stream. WeiDU's lexer takes the longest match,
+// so a symbol can absorb spaces, digits and "//" after its first letter.
+// A slash starts a comment only when the lexer reaches it as a token.
 DEFINE_PATCH_FUNCTION c0bw_scan_projectile_ids
-  INT_VAR record_symbols = 0
+  INT_VAR missile_labels = 0
   RET max_id ids_complete
-  RET_ARRAY c0bw_projectile_ids
 BEGIN
   SET max_id = ~-1~
-  LPF c0bw_strip_ids_comments RET ids_complete END
-  PATCH_IF record_symbols BEGIN PATCH_CLEAR_ARRAY c0bw_projectile_ids END
-  PATCH_IF ids_complete BEGIN
-    SET header = 1
-    READ_2DA_ENTRIES_NOW ids_rows 1
-    FOR (row = 0; row < ids_rows; ++row) BEGIN
-      READ_2DA_ENTRY_FORMER ids_rows row 0 id
-      PATCH_IF IS_AN_INT id BEGIN
-        SET named = VARIABLE_IS_SET EVAL ~ids_rows_%row%_1~
-        PATCH_IF NOT header OR named BEGIN
-          PATCH_IF id > max_id BEGIN SET max_id = id END
-          PATCH_IF record_symbols AND named BEGIN
-            READ_2DA_ENTRY_FORMER ids_rows row 1 symbol
-            TO_UPPER symbol
-            SET $c0bw_projectile_ids(~%symbol%~) = id
+  SET ids_complete = 1
+  SET cursor = 0
+  SET first_id = ~-1~
+  SET preamble = 1
+  SPRINT name_start ~A-Za-z_#~
+  SPRINT name_body ~A-Za-z_0-9#.! /'-~
+  PATCH_IF missile_labels BEGIN
+    // WeiDU 249 uses idslexer2 for BG2's MISSILE labels.
+    SPRINT name_start ~A-Za-z_#(*~
+    SPRINT name_body ~A-Za-z_0-9#.! /',()?+-~
+  END
+  WHILE cursor < BUFFER_LENGTH AND ids_complete BEGIN
+    SET ch = BYTE_AT cursor
+    PATCH_IF ch = 0x20 OR ch = 0x09 OR ch = 0x0D OR ch = 0x0A OR ch = 0x0C BEGIN
+      SET cursor += 1
+    END ELSE PATCH_IF ch = 0x2F AND cursor + 1 < BUFFER_LENGTH AND BYTE_AT (cursor + 1) = 0x2F BEGIN
+      SET end_of_line = INDEX_BUFFER (EXACT_MATCH ~%LNL%~ cursor)
+      SET cursor = end_of_line < 0 ? BUFFER_LENGTH : end_of_line + 1
+    END ELSE PATCH_IF ch = 0x2F AND cursor + 1 < BUFFER_LENGTH AND BYTE_AT (cursor + 1) = 0x2A BEGIN
+      SET cursor += 2
+      SET depth = 1
+      WHILE depth > 0 AND cursor < BUFFER_LENGTH BEGIN
+        SET marker = INDEX_BUFFER (~/\*\|\*/~ cursor)
+        PATCH_IF marker < 0 BEGIN
+          SET cursor = BUFFER_LENGTH
+        END ELSE BEGIN
+          SET cursor = marker + 2
+          PATCH_IF BYTE_AT marker = 0x2F BEGIN SET depth += 1 END ELSE BEGIN SET depth -= 1 END
+        END
+      END
+      SET ids_complete = depth = 0
+    END ELSE BEGIN
+      SET name_at = INDEX_BUFFER (CASE_SENSITIVE ~[1-9]*[%name_start%]~ cursor)
+      SET number_at = INDEX_BUFFER (~-?[0-9]~ cursor)
+      PATCH_IF name_at = cursor BEGIN
+        SET name_end = INDEX_BUFFER (CASE_SENSITIVE ~[^%name_body%]~ cursor)
+        SET cursor = name_end < 0 ? BUFFER_LENGTH : name_end
+        PATCH_IF preamble AND first_id >= 0 BEGIN
+          SET max_id = first_id
+          SET preamble = 0
+        END
+      END ELSE PATCH_IF number_at = cursor BEGIN
+        SET digit_start = cursor + (ch = 0x2D)
+        SET number_end = INDEX_BUFFER (~[^0-9]~ digit_start)
+        PATCH_IF ch = 0x30 AND cursor + 2 < BUFFER_LENGTH AND BYTE_AT (cursor + 1) = 0x78 BEGIN
+          SET hex_end = INDEX_BUFFER (~[^0-9A-Fa-f]~ (cursor + 2))
+          PATCH_IF hex_end != cursor + 2 BEGIN SET number_end = hex_end END
+        END
+        PATCH_IF number_end < 0 BEGIN SET number_end = BUFFER_LENGTH END
+        READ_ASCII cursor id (number_end - cursor)
+        SET cursor = number_end
+        PATCH_IF IS_AN_INT id BEGIN
+          PATCH_IF preamble AND first_id < 0 BEGIN
+            // Defer a leading standalone entry count. After the first row,
+            // numeric-only entries reserve their IDs even without a name.
+            SET first_id = id
+          END ELSE BEGIN
+            SET preamble = 0
+            PATCH_IF id > max_id BEGIN SET max_id = id END
           END
         END
-        SET header = 0
+      END ELSE BEGIN
+        SET cursor += 1
       END
     END
   END
 END
 
 DEFINE_ACTION_FUNCTION c0bw_read_projectile_index
-  RET projectile_base index_ready
-  RET_ARRAY c0bw_projectile_ids
+  RET projectile_base index_ready has_missile
 BEGIN
   OUTER_SET max_projectile = ~-1~
   OUTER_SET max_missile = ~-1~
   OUTER_SET projectl_complete = 0
   OUTER_SET missile_complete = 1
-  ACTION_CLEAR_ARRAY c0bw_projectile_ids
+  OUTER_SET has_missile = FILE_EXISTS_IN_GAME ~MISSILE.IDS~
   ACTION_IF FILE_EXISTS_IN_GAME ~PROJECTL.IDS~ BEGIN
     COPY_EXISTING - ~PROJECTL.IDS~ ~.../c0bw-inlined/projectl-index.ids~
-      LPF c0bw_scan_projectile_ids INT_VAR record_symbols = 1
-        RET max_projectile = max_id projectl_complete = ids_complete RET_ARRAY c0bw_projectile_ids
-      END
+      LPF c0bw_scan_projectile_ids RET max_projectile = max_id projectl_complete = ids_complete END
   END
-  ACTION_IF FILE_EXISTS_IN_GAME ~MISSILE.IDS~ BEGIN
+  ACTION_IF has_missile BEGIN
     COPY_EXISTING - ~MISSILE.IDS~ ~.../c0bw-inlined/missile-index.ids~
-      LPF c0bw_scan_projectile_ids RET max_missile = max_id missile_complete = ids_complete END
+      LPF c0bw_scan_projectile_ids INT_VAR missile_labels = 1
+        RET max_missile = max_id missile_complete = ids_complete
+      END
   END
   OUTER_SET index_ready = projectl_complete AND missile_complete AND max_projectile >= 0
   OUTER_SET projectile_base = max_projectile >= max_missile - 1 ? max_projectile : max_missile - 1
@@ -464,14 +444,13 @@ BEGIN
     BUT_ONLY
   END
   ACTION_IF ready AND asset_type = 3 BEGIN
-    LAF c0bw_read_projectile_index RET projectile_base index_ready RET_ARRAY c0bw_projectile_ids END
-    ACTION_TO_UPPER asset
-    OUTER_SET already_registered = VARIABLE_IS_SET $c0bw_projectile_ids(~%asset%~)
+    CLEAR_IDS_MAP
+    OUTER_SET existing_id = IDS_OF_SYMBOL (~PROJECTL~ ~%asset%~)
+    OUTER_SET already_registered = existing_id >= 0
     ACTION_IF already_registered BEGIN
-      OUTER_SET existing_id = $c0bw_projectile_ids(~%asset%~)
       OUTER_SET ready = existing_id >= 1 AND existing_id <= 0xFFFE
     END ELSE BEGIN
-      OUTER_SET ready = index_ready AND projectile_base < 0xFFFE
+      LAF c0bw_check_projectile_capacity INT_VAR donor_count = 1 RET ready = ids_ready projectile_base END
     END
     ACTION_IF NOT ready BEGIN
       PRINT ~Bardic Wonders #2004: no projectile IDs available for %filename%.~
@@ -834,8 +813,33 @@ BEGIN
   OUTER_SET ids_ready = 1
   OUTER_SET projectile_base = ~-1~
   ACTION_IF donor_count > 0 BEGIN
-    LAF c0bw_read_projectile_index RET projectile_base index_ready END
-    OUTER_SET ids_ready = index_ready AND projectile_base <= 0xFFFE - donor_count
+    LAF c0bw_read_projectile_index RET projectile_base index_ready has_missile END
+    OUTER_SET ids_ready = 0
+    ACTION_IF index_ready AND projectile_base <= 0xFFFE - donor_count BEGIN
+      CLEAR_IDS_MAP
+      OUTER_SET candidate = projectile_base + 1
+      OUTER_SET free_pairs = 0
+      OUTER_WHILE free_pairs < donor_count AND candidate <= 0xFFFE - (donor_count - free_pairs) + 1 BEGIN
+        OUTER_SET missile_id = candidate + 1
+        OUTER_SPRINT missile_label ~%missile_id%~
+        OUTER_PATCH ~~ BEGIN
+          LOOKUP_IDS_SYMBOL_OF_INT projectile_label ~PROJECTL~ candidate
+          PATCH_IF has_missile BEGIN
+            LOOKUP_IDS_SYMBOL_OF_INT missile_label ~MISSILE~ missile_id
+          END
+        END
+        // An unoccupied number is returned as its decimal spelling.
+        ACTION_IF ~%projectile_label%~ STRING_EQUAL ~%candidate%~
+          AND ~%missile_label%~ STRING_EQUAL ~%missile_id%~ BEGIN
+          OUTER_SET free_pairs += 1
+        END ELSE BEGIN
+          OUTER_SET projectile_base = candidate
+          OUTER_SET free_pairs = 0
+        END
+        OUTER_SET candidate += 1
+      END
+      OUTER_SET ids_ready = free_pairs = donor_count
+    END
   END
 END
 

@@ -1356,6 +1356,87 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertEqual(before, [path.read_bytes() for path in (ids, missiles, song)])
             self.assertFalse(list(override.glob("C0P*.PRO")))
 
+    def assert_projectl_lookup(self, root: Path, symbol: str, number: int, expected_label: str) -> None:
+        (root / "lookup.tp2").write_text(
+            "BACKUP ~lookup-backup~\nAUTHOR ~test~\nBEGIN ~Native PROJECTL lookups~\n"
+            "CLEAR_IDS_MAP\n"
+            f"OUTER_SET found = IDS_OF_SYMBOL (~PROJECTL~ ~{symbol}~)\n"
+            f"ACTION_IF found != {number} BEGIN FAIL ~Unexpected symbol ID %found%~ END\n"
+            "OUTER_PATCH ~~ BEGIN\n"
+            f"  LOOKUP_IDS_SYMBOL_OF_INT label ~PROJECTL~ {number}\n"
+            f"  PATCH_IF ~%label%~ STRING_COMPARE_CASE ~{expected_label}~ BEGIN\n"
+            "    PATCH_FAIL ~Unexpected label %label%~\n"
+            "  END\nEND\n",
+            encoding="ascii",
+        )
+        result = subprocess.run(
+            [str(WEIDU), "lookup.tp2", "--no-auto-tp2", "--noautoupdate", "--no-exit-pause",
+             "--game", str(root), "--language", "0", "--force-install-list", "0"],
+            cwd=root, text=True, capture_output=True, check=False, timeout=60,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def assert_native_occupied_token_survives(self, stock_and_taken: bytes) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n" + stock_and_taken)
+            foreign = bytearray((MOD / "bardsong/c0bardx.spl").read_bytes())
+            ability, = struct.unpack_from("<I", foreign, 0x64)
+            struct.pack_into("<H", foreign, ability + 0x26, 525)
+            old = override / "XQOLD.SPL"
+            old.write_bytes(foreign)
+            (override / "XQTAKEN.PRO").write_bytes(resource(override, "INAREAPA.PRO").read_bytes())
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(foreign, old.read_bytes())
+            self.assert_projectile_pair(song, ids, resource(override, "MISSILE.IDS"), 525)
+            self.assert_projectl_lookup(root, "XQTAKEN", 524, "XQTAKEN")
+
+    def test_projectile_ids_form_feed_before_occupied_number(self) -> None:
+        self.assert_native_occupied_token_survives(b"523 C0BWSNP\r\n\x0c524 XQTAKEN\r\n")
+
+    def test_projectile_ids_two_pairs_on_one_line(self) -> None:
+        self.assert_native_occupied_token_survives(b"523 C0BWSNP\t524 XQTAKEN\r\n")
+
+    def test_projectile_registration_uses_native_symbol_with_trailing_line_marker(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(
+                b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO // note\r\n522 C0BWSPA\r\n523 C0BWSNP\r\n"
+            )
+            missiles = resource(override, "MISSILE.IDS")
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(["524 C0BARDSO", "525 C0P0"], ids.read_text().splitlines()[-2:])
+            self.assert_projectile_pair(song, ids, missiles, 525)
+            self.assert_projectl_lookup(root, "C0BARDSO // note", 521, "C0BARDSO // note")
+            self.assert_projectl_lookup(root, "C0BARDSO", 524, "C0BARDSO")
+            self.assertTrue(resource(override, "C0BARDSO.PRO").read_bytes()[0x0C] & 0x40)
+
+    def test_projectile_pair_skips_native_empty_reservations_in_both_tables(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(
+                b"IDS V1.0\r\n525\r\n157 INAREAPA\r\n521 C0BARDSO\r\n"
+                b"522 C0BWSPA\r\n523 C0BWSNP\r\n524 XQTAKEN\r\n"
+            )
+            missiles = resource(override, "MISSILE.IDS")
+            missiles.write_bytes(b"IDS V1.0\r\n527\r\n525 Other missile\r\n")
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assert_projectile_pair(song, ids, missiles, 527)
+
     def test_fallback_excludes_one_shot_cast_cue_from_repeat_candidates(self) -> None:
         for cue_opcodes in ((177,), (177, 272)):
             with self.subTest(cue_opcodes=cue_opcodes), disposable_game() as root:
