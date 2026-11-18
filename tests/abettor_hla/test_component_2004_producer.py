@@ -871,6 +871,77 @@ class Component2004ProducerTests(unittest.TestCase):
                 self.assertEqual(before_ids, ids.read_bytes())
                 self.assertEqual(before_missiles, missiles.read_bytes())
 
+    def test_owned_song_wraps_after_a_damaged_party_profile(self) -> None:
+        self.assert_failed_stock_startup_isolated(damaged=True)
+
+    def test_owned_song_wraps_after_party_profile_exceeds_id_capacity(self) -> None:
+        self.assert_failed_stock_startup_isolated(damaged=False)
+
+    def test_healthy_owned_song_commits_unregistered_controller_after_failed_startup(self) -> None:
+        self.assert_failed_stock_startup_isolated(damaged=True, controller_alias=True)
+
+    def test_external_song_wraps_after_a_damaged_party_profile(self) -> None:
+        self.assert_failed_stock_startup_isolated(damaged=True, external=True)
+
+    def assert_failed_stock_startup_isolated(
+        self, *, damaged: bool, controller_alias: bool = False, external: bool = False,
+    ) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            source = (MOD / "abettor/c0abets2.spl").read_bytes()
+            party = override / "SPCL542A.SPL"
+            party.write_bytes(source)
+            if external:
+                healthy, _ = self.seed_external_song_and_bard_text(override)
+            else:
+                healthy = override / "SPCL751A.SPL"
+                healthy.write_bytes(source)
+            aliases = b"521 XQFOREIGN\r\n" if controller_alias else b""
+            if damaged:
+                profile = root / "testmod/bardsong/projectiles/C0BWSPA.PRO"
+                profile.write_bytes(b"PRO V1.0")
+            else:
+                aliases += b"522 XQFOREIGN\r\n"
+            ceiling = 65534 if controller_alias else 65535
+            projectl = aliases + (b"" if external else f"{ceiling - 1} XQHIGH\r\n".encode("ascii"))
+            missile = b"" if external else f"{ceiling} XQHIGH\r\n".encode("ascii")
+            ids, missiles = self.seed_projectile_registry(override, projectl, missile)
+            before_ids, before_missiles = ids.read_bytes(), missiles.read_bytes()
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            diagnostics = result.stdout.upper()
+            if damaged:
+                self.assertEqual(1, sum("SKIPPING DAMAGED" in line and "C0BWSPA.PRO" in line
+                                        for line in diagnostics.splitlines()), result.stdout)
+            else:
+                self.assertEqual(1, diagnostics.count("NO PROJECTILE IDS AVAILABLE FOR THE REQUIRED CORE PROJECTILES"))
+            self.assertEqual(source, party.read_bytes())
+            self.assertEqual(source, resource(override, "C0ABETS2.SPL").read_bytes())
+            self.assertFalse((override / "C0BWSPA.PRO").exists())
+            self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+            wrapper = parse_spl(healthy)
+            self.assertEqual({65535 if controller_alias else 522}, {ability.projectile for ability in wrapper.abilities})
+            pulse = wrapper.find_effects(opcode=272)[0].resource
+            self.assertEqual(pulse, read_eff_resource(resource(override, pulse + ".EFF")))
+            payload = parse_spl(resource(override, pulse + ".SPL"))
+            self.assertEqual({525 if external else 524}, {ability.projectile for ability in payload.abilities})
+            profile_name = "C0P0" if external else "C0BWSNP"
+            self.assertTrue(resource(override, profile_name + ".PRO").read_bytes()[0x0C] & 0x40)
+            private = sorted(path.name.upper() for path in override.glob("C0P*.PRO"))
+            if controller_alias or external:
+                self.assertEqual(["C0P0.PRO"], private)
+                self.assertTrue(resource(override, "C0P0.PRO").read_bytes()[0x0C] & 0x40)
+                allocated = 65534 if controller_alias else 524
+                self.assertEqual(before_ids.splitlines() + [f"{allocated} C0P0".encode("ascii")], ids.read_bytes().splitlines())
+                self.assertEqual(before_missiles.splitlines() + [f"{allocated + 1} C0P0".encode("ascii")],
+                                 missiles.read_bytes().splitlines())
+            else:
+                self.assertFalse(private)
+                self.assertEqual(before_ids, ids.read_bytes())
+                self.assertEqual(before_missiles, missiles.read_bytes())
+
     def test_compound_assignments_match_legacy_global_and_ability_traversal(self) -> None:
         def opcodes(records):
             return tuple(struct.unpack_from("<H", record)[0] for record in records)

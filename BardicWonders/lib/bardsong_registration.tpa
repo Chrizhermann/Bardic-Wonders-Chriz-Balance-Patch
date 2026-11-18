@@ -510,7 +510,8 @@ END
 
 // Stage the requested profiles as one batch without writing PRO or IDS files.
 DEFINE_ACTION_FUNCTION c0bw_plan_core_projectiles
-  STR_VAR batch = "the required core projectiles"
+  INT_VAR controller_only = 0
+  STR_VAR batch = "the required core projectiles" stock_profile = ""
   RET profiles_ready core_base core_end
   RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
     c0bw_resolved_projectiles c0bw_damaged_resources
@@ -528,7 +529,8 @@ BEGIN
   OUTER_SET new_count = 0
   OUTER_SET private_count = 0
   ACTION_FOR_EACH asset IN C0BARDSO C0BWSPA C0BWSNP C0BWSIW C0BWSIA C0BDD#SO BEGIN
-    ACTION_IF VARIABLE_IS_SET $c0bw_batch_assets(~%asset%~) BEGIN
+    ACTION_IF (controller_only AND ~%asset%~ STRING_EQUAL ~C0BARDSO~)
+      OR (NOT controller_only AND VARIABLE_IS_SET $c0bw_batch_assets(~%asset%~)) BEGIN
       OUTER_SPRINT legacy_label ~%asset%~
       OUTER_SPRINT packaged ~%MOD_FOLDER%/bardsong/projectiles/%asset%.PRO~
       ACTION_IF ~%asset%~ STRING_EQUAL ~C0BARDSO~ BEGIN
@@ -545,7 +547,7 @@ BEGIN
           SET asset_ready = c0bw_valid
           PATCH_IF asset_ready BEGIN WRITE_LONG 0x0C (THIS BOR 0x40) END
       END ELSE BEGIN
-        PRINT ~Bardic Wonders #2004: missing packaged %asset%.PRO.~
+        OUTER_SET $c0bw_damaged_resources(~%asset%.PRO~) = 4
       END
       ACTION_IF NOT asset_ready AND FILE_EXISTS_IN_GAME ~%asset%.PRO~ BEGIN
         COPY_EXISTING - ~%asset%.PRO~ ~.../c0bw-inlined/core-%asset%.pro~
@@ -602,6 +604,8 @@ BEGIN
           OUTER_SPRINT $c0bw_resolved_projectiles(~%projectile%~) ~%resref%~
         END
       END
+    END ELSE ACTION_IF ~%stock_profile%~ STRING_COMPARE ~~ BEGIN
+      OUTER_SET $c0bw_damaged_resources(~%stock_profile%.PRO~) = 3
     END ELSE BEGIN
       PRINT ~Bardic Wonders #2004: no projectile IDs available for %batch%.~
     END
@@ -1151,7 +1155,7 @@ END
 DEFINE_ACTION_FUNCTION c0bw_wrap_song
   INT_VAR payload_projectile = 1 preserve_projectiles = 0 templates_ready = 0 c0bardso = 0
   STR_VAR bardsong_name = "" controller_pulse = "" stock_profile = ""
-  RET song_name c0bardso payload_projectile profiles_ready
+  RET song_name c0bardso payload_projectile
   RET_ARRAY c0bw_damaged_resources
 BEGIN
   OUTER_SPRINT song_name ""
@@ -1178,7 +1182,7 @@ BEGIN
     ACTION_IF NOT c0bardso OR NOT payload_projectile BEGIN
       ACTION_IF NOT c0bardso BEGIN OUTER_SET $c0bw_batch_assets(C0BARDSO) = 1 END
       ACTION_IF NOT payload_projectile BEGIN OUTER_SET $c0bw_batch_assets(~%stock_profile%~) = 1 END
-      LAF c0bw_plan_core_projectiles RET profiles_ready core_base core_end
+      LAF c0bw_plan_core_projectiles STR_VAR stock_profile RET profiles_ready core_base core_end
         RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
           c0bw_resolved_projectiles c0bw_damaged_resources
       END

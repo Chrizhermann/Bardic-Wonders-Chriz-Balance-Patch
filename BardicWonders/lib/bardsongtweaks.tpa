@@ -111,9 +111,17 @@ END
 LAF c0bw_find_external_songs RET_ARRAY c0bw_eligible_songs c0bw_damaged_resources END
 
 OUTER_SET plan_attempted = loader_ready AND templates_ready AND support_ready
+OUTER_SET startup_ready = 0
+ACTION_IF plan_attempted BEGIN
+  // Check only the shared controller here. Its PRO and ID remain staged
+  // until a song can commit them together with its own payload delivery.
+  LAF c0bw_plan_core_projectiles INT_VAR controller_only = 1
+    RET startup_ready = profiles_ready RET_ARRAY c0bw_damaged_resources
+  END
+END
 OUTER_SET finite_ready = 0
 OUTER_SPRINT symphony_payload ""
-ACTION_IF plan_attempted BEGIN
+ACTION_IF startup_ready BEGIN
   ACTION_CLEAR_ARRAY c0bw_finite_profiles
   OUTER_SET $c0bw_finite_profiles(1) = 1
   ACTION_IF iwd_stock_projectile > 0 BEGIN
@@ -125,48 +133,39 @@ ACTION_IF plan_attempted BEGIN
 
   OUTER_SET c0bardso = 0
   OUTER_SET installed_wrappers = 0
-  OUTER_SET startup_ready = 1
   ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
-    ACTION_IF startup_ready AND ~%song%~ STRING_COMPARE ~C0ABETS2~ BEGIN
+    ACTION_IF ~%song%~ STRING_COMPARE ~C0ABETS2~ BEGIN
       OUTER_SET projectile = 0
       ACTION_IF VARIABLE_IS_SET $c0bw_finite_profiles(~%profile%~) BEGIN
         OUTER_SET projectile = $c0bw_finite_profiles(~%profile%~)
       END
       LAF c0bw_wrap_song INT_VAR payload_projectile = projectile templates_ready = 1 c0bardso
         STR_VAR controller_pulse bardsong_name = EVAL ~%song%~ stock_profile = EVAL ~%profile%~
-        RET wrapped_song = song_name c0bardso projectile = payload_projectile profiles_ready
+        RET wrapped_song = song_name c0bardso projectile = payload_projectile
         RET_ARRAY c0bw_damaged_resources
       END
-      // Preserve the write-free startup when the first required stock
-      // projectiles cannot be allocated with the controller.
-      OUTER_SET startup_ready = c0bardso > 0 OR profiles_ready
       ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN
         OUTER_SET installed_wrappers += 1
         OUTER_SET $c0bw_finite_profiles(~%profile%~) = projectile
       END
     END
   END
-  ACTION_IF startup_ready BEGIN
-    OUTER_SET song_party_projectile = 0
-    ACTION_IF VARIABLE_IS_SET $c0bw_finite_profiles(C0BWSPA) BEGIN
-      OUTER_SET song_party_projectile = $c0bw_finite_profiles(C0BWSPA)
-    END
-    LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile templates_ready = 1 c0bardso
-      STR_VAR controller_pulse bardsong_name = ~C0ABETS2~ stock_profile = ~C0BWSPA~
-      RET symphony_payload = song_name c0bardso song_party_projectile = payload_projectile profiles_ready
-      RET_ARRAY c0bw_damaged_resources
-    END
-    ACTION_IF ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
-      OUTER_SET installed_wrappers += 1
-    END
-    OUTER_SET external_wrappers = 0
-    ACTION_IF c0bardso > 0 OR profiles_ready BEGIN
-      LAF c0bw_wrap_external_songs INT_VAR c0bardso STR_VAR controller_pulse
-        RET external_wrappers RET_ARRAY c0bw_damaged_resources
-      END
-    END
-    OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
+  OUTER_SET song_party_projectile = 0
+  ACTION_IF VARIABLE_IS_SET $c0bw_finite_profiles(C0BWSPA) BEGIN
+    OUTER_SET song_party_projectile = $c0bw_finite_profiles(C0BWSPA)
   END
+  LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile templates_ready = 1 c0bardso
+    STR_VAR controller_pulse bardsong_name = ~C0ABETS2~ stock_profile = ~C0BWSPA~
+    RET symphony_payload = song_name c0bardso song_party_projectile = payload_projectile
+    RET_ARRAY c0bw_damaged_resources
+  END
+  ACTION_IF ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
+    OUTER_SET installed_wrappers += 1
+  END
+  LAF c0bw_wrap_external_songs INT_VAR c0bardso STR_VAR controller_pulse
+    RET external_wrappers RET_ARRAY c0bw_damaged_resources
+  END
+  OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
 END
 INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
 
@@ -208,6 +207,10 @@ END
 ACTION_PHP_EACH c0bw_damaged_resources AS damaged_file => reason BEGIN
   ACTION_IF reason = 2 BEGIN
     PRINT ~Bardic Wonders #2004: skipping %damaged_file% at the 65535-effect capacity limit.~
+  END ELSE ACTION_IF reason = 3 BEGIN
+    PRINT ~Bardic Wonders #2004: no projectile IDs available for the required core projectiles (%damaged_file%).~
+  END ELSE ACTION_IF reason = 4 BEGIN
+    PRINT ~Bardic Wonders #2004: missing packaged %damaged_file%.~
   END ELSE BEGIN
     PRINT ~Bardic Wonders #2004: skipping damaged %damaged_file%.~
   END
