@@ -24,8 +24,8 @@ WEIDU = ROOT / "Setup-BardicWonders.exe"
 
 
 @contextmanager
-def disposable_game():
-    root = Path(tempfile.mkdtemp(prefix="sol62-bardic-unit-"))
+def disposable_game(*, prefix="sol62-bardic-unit-"):
+    root = Path(tempfile.mkdtemp(prefix=prefix))
     try:
         yield root
     finally:
@@ -1005,7 +1005,7 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertEqual([326, 309, 251, 101], [e.opcode for e in parse_spl(caller).abilities[0].effects])
 
     def test_stale_state_is_deactivated_before_a_later_description_pass(self) -> None:
-        with disposable_game() as root:
+        with disposable_game(prefix="sol62-bardic-unit~1-") as root:
             self.make_fixture(root, existing_projectile=520, snapshot=False)
             override = root / "override"
             song, text = self.seed_external_song_and_bard_text(override)
@@ -1028,8 +1028,10 @@ class Component2004ProducerTests(unittest.TestCase):
                 "LAF c0bw_write_song_description INT_VAR current_component = 2012 END\n",
                 encoding="ascii",
             )
-            args = [str(WEIDU), str(tp2), "--no-auto-tp2", "--noautoupdate", "--no-exit-pause",
-                    "--game", str(root), "--language", "0"]
+            # WeiDU writes the TP2 path in tilde-delimited log fields.
+            # Keep the temp directory out of that path, including on RUNNER~1.
+            args = [str(WEIDU), tp2.relative_to(root).as_posix(), "--no-auto-tp2",
+                    "--noautoupdate", "--no-exit-pause", "--game", str(root), "--language", "0"]
             result = subprocess.run(args + ["--force-install-list", "2004"], cwd=root, text=True,
                                     capture_output=True, timeout=60)
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
