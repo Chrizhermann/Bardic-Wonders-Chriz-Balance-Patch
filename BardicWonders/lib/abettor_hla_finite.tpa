@@ -17,38 +17,34 @@ ACTION_IF FILE_EXISTS_IN_GAME ~LUC0ABET.2DA~ AND ~%symphony_payload%~ STRING_COM
 END
 ACTION_IF symphony_templates_valid BEGIN
   COPY ~%MOD_FOLDER%/bardsong/c0singin.spl~ ~override/C0ABIVI.SPL~
-    LPF DELETE_EFFECT INT_VAR check_globals = 0 match_opcode = 139 END
-    LPF DELETE_EFFECT INT_VAR check_globals = 0 match_opcode = 136 END
-    LPF ALTER_SPELL_HEADER INT_VAR target = 5 range = 50 projectile = song_party_projectile END
-    LPF c0bw_prepare_effect_insertion END
-    LPF ADD_SPELL_EFFECT INT_VAR opcode = 20 target = 2 timing = 0 duration = 6
-      probability1 = 100 probability2 = 0
+    LPF c0bw_extend_song_effects INT_VAR opcode = 20 target = 2 timing = 0 duration = 6 strip_messages = 1
+      RET c0bw_extended RET_ARRAY c0bw_damaged_resources
     END
+    PATCH_IF c0bw_extended BEGIN
+      LPF ALTER_SPELL_HEADER INT_VAR target = 5 range = 50 projectile = song_party_projectile END
+    END
+  BUT_ONLY
+  OUTER_SET symphony_templates_valid = c0bw_extended
+END
+ACTION_IF symphony_templates_valid BEGIN
+  COPY_EXISTING ~C0ABETS2.SPL~ ~override~
+    LPF c0bw_extend_song_effects INT_VAR opcode = 177 target = 9 parameter2 = 2 symphony = 1
+      STR_VAR resource = ~C0ABIVS~
+      RET c0bw_extended RET_ARRAY c0bw_damaged_resources
+    END
+  BUT_ONLY
+  OUTER_SET symphony_templates_valid = c0bw_extended
+END
+ACTION_IF symphony_templates_valid BEGIN
 
   COPY ~%MOD_FOLDER%/bardsong/c0singin.eff~ ~override/C0ABIVS.EFF~
     WRITE_ASCII 0x30 ~C0ABIVI~ (8)
 
-  COPY_EXISTING ~C0ABETS2.SPL~ ~override~
-    LPF c0bw_prepare_effect_insertion END
-    LPF ADD_SPELL_EFFECT INT_VAR opcode = 177 target = 9 parameter2 = 2 timing = 1
-      probability1 = 100 probability2 = 0
-      STR_VAR resource = ~C0ABIVS~
-    END
-    // The shipped controller has 600 ticks at level one and adds 100 ticks
-    // per header. Mode 4 takes whole seconds, rounded up at 15 ticks/second.
-    FOR (song_header = 1; song_header <= 11; ++song_header) BEGIN
-      LPF c0bw_prepare_effect_insertion INT_VAR selected_header = song_header END
-      LPF ADD_SPELL_EFFECT INT_VAR header = song_header opcode = 326 target = 9 timing = 4
-        duration = (600 + (song_header - 1) * 100 + 14) / 15
-        probability1 = 100 probability2 = 0
-        STR_VAR resource = ~C0ABIVI~
-      END
-    END
-
   INCLUDE ~%MOD_FOLDER%/lib/abettor_symphony.tpa~
   COPY_EXISTING ~C0ABETHL.SPL~ ~override~
-    LPF c0bw_link_song_assignment
+    LPF c0bw_add_assignment_links
       STR_VAR bardsong_name = ~C0ABETS2~ song_name = EVAL ~%symphony_payload%~
+      RET_ARRAY c0bw_damaged_resources
     END
 
   COPY_EXISTING ~LUC0ABET.2DA~ ~override~

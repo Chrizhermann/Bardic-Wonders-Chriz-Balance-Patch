@@ -176,6 +176,34 @@ def duplicate_first_ability(spell: bytearray) -> None:
     spell.extend(records)
 
 
+def external_assignment_with_late_casting(*, multiple: bool = False, capacity: int = 0) -> bytes:
+    source = (MOD / "abettor/c0abethl.spl").read_bytes()
+    header, _, effects = struct.unpack_from("<IHI", source, 0x64)
+    ability = source[header:header + 0x28]
+    record = source[effects:effects + 0x30].replace(b"C0ABETS2", b"XQSONG\0\0")
+    assert struct.unpack_from("<H", record)[0] == 251
+    casting = struct.pack("<HBB", 139, 1, 9) + bytes(range(4, 0x30))
+    unrelated = struct.pack("<HBB", 101, 2, 5) + bytes(range(4, 0x30))
+    count = 3 if multiple else 1
+    offset = 0x72 + count * 0x28
+    caller = bytearray(source[:0x72] + ability * count)
+    if capacity:
+        struct.pack_into("<IHIHH", caller, 0x64, 0x72, 1, offset, 0, 0)
+        struct.pack_into("<HH", caller, 0x72 + 0x1E, capacity, 0)
+        caller.extend(record + bytes((capacity - 1) * 0x30))
+    elif multiple:
+        struct.pack_into("<IHIHH", caller, 0x64, 0x72, count, offset, 2, 1)
+        struct.pack_into("<HH", caller, 0x72 + 0x1E, 1, 1)
+        struct.pack_into("<HH", caller, 0x9A + 0x1E, 1, 0)
+        struct.pack_into("<HH", caller, 0xC2 + 0x1E, 0, 0xFFFF)
+        caller.extend(unrelated + record + casting)
+    else:
+        struct.pack_into("<IHIHH", caller, 0x64, 0x72, 1, offset, 1, 1)
+        struct.pack_into("<HH", caller, 0x72 + 0x1E, 1, 0)
+        caller.extend(record + casting)
+    return bytes(caller)
+
+
 class Component2004ProducerTests(unittest.TestCase):
     def make_fixture(self, root: Path, *, existing_projectile: int, reserve_payload_name: bool = False, snapshot: bool = True) -> None:
         override = root / "override"
@@ -632,6 +660,105 @@ class Component2004ProducerTests(unittest.TestCase):
             "XQOVG.SPL": song_loader_with_shared_effect_table(0, multiple=True, overlap="casting"),
             "XQOVA.SPL": song_loader_with_shared_effect_table(1, multiple=True, overlap="abilities"),
         })
+
+    def seed_external_song_and_bard_text(self, override: Path) -> tuple[Path, Path]:
+        song = override / "XQSONG.SPL"
+        song.write_bytes((MOD / "abettor/c0abets2.spl").read_bytes())
+        text = override / "CLASTEXT.2DA"
+        text.write_bytes(b"2DA V1.0\n0\nCLASS MASK NAME DESC\nBARD 5 0 0 0\n")
+        return song, text
+
+    def test_assignment_write_preserves_casting_and_out_of_order_ability_slices(self) -> None:
+        for multiple in (False, True):
+            with self.subTest(multiple=multiple), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                override = root / "override"
+                song, _ = self.seed_external_song_and_bard_text(override)
+                caller = override / "XQASSIGN.SPL"
+                caller.write_bytes(external_assignment_with_late_casting(multiple=multiple))
+                casting, abilities = effect_records(caller)
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                pulse = next(e.resource for e in parse_spl(song).abilities[0].effects if e.opcode == 272)
+                parsed = parse_spl(caller)
+                self.assertEqual([326, 309, 251], [e.opcode for e in parsed.abilities[0].effects])
+                self.assertEqual(pulse, parsed.abilities[0].effects[1].resource)
+                after_casting, after_abilities = effect_records(caller)
+                self.assertEqual(casting, after_casting)
+                self.assertEqual(abilities[0], after_abilities[0][2:])
+                self.assertEqual(abilities[1:], after_abilities[1:])
+                self.assertEqual(0, struct.unpack_from("<H", caller.read_bytes(), 0x6E)[0])
+
+    def test_full_loader_preserves_unwrapped_songs_and_does_not_publish_finite_state(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            self.seed_bard_clabs(override)
+            song, text = self.seed_external_song_and_bard_text(override)
+            baseline_song, baseline_text = song.read_bytes(), text.read_bytes()
+            full = song_loader_with_layout(0x72, 0x9A, effect_count=0xFFFF)
+            (root / "testmod/bardsong/c0bardx.spl").write_bytes(full)
+            installed = override / "C0BARDX.SPL"
+            installed.write_bytes(full)
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.count("skipping C0BARDX.SPL at the 65535-effect capacity limit"))
+            self.assertEqual(full, installed.read_bytes())
+            self.assertEqual(0xFFFF, struct.unpack_from("<H", installed.read_bytes(), 0x90)[0])
+            self.assertEqual(baseline_song, song.read_bytes())
+            self.assertEqual(baseline_text, text.read_bytes())
+            self.assertNotIn("AP_C0BARDX", resource(override, "CLABBA01.2DA").read_text().split())
+            self.assertFalse((override / "C0BWSYS.2DA").exists())
+
+    def test_assignment_overflow_leaves_near_full_caller_unchanged(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            caller = override / "XQASSIGN.SPL"
+            baseline = external_assignment_with_late_casting(capacity=0xFFFE)
+            caller.write_bytes(baseline)
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.count("skipping XQASSIGN.SPL at the 65535-effect capacity limit"))
+            self.assertEqual(baseline, caller.read_bytes())
+            self.assertTrue(parse_spl(song).find_effects(opcode=272))
+
+    def test_unusable_loader_preserves_preinstallation_bard_description(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            self.seed_bard_clabs(override, "AP_C0BARDX")
+            song, text = self.seed_external_song_and_bard_text(override)
+            baseline_song, baseline_text = song.read_bytes(), text.read_bytes()
+            (root / "testmod/bardsong/c0bardx.spl").write_bytes(song_loader_with_layout(0x72, 0xFFFFFFFF))
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(baseline_text, text.read_bytes())
+            self.assertEqual(baseline_song, song.read_bytes())
+            self.assertNotIn("AP_C0BARDX", resource(override, "CLABBA01.2DA").read_text().split())
+
+    def test_loader_uses_last_slot_only_once_and_preserves_the_remaining_song(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            resource(override, "C0ABETS2.SPL").unlink()
+            song, _ = self.seed_external_song_and_bard_text(override)
+            alternate = override / "XQOTHER.SPL"
+            original = song.read_bytes()
+            alternate.write_bytes(original)
+            (root / "testmod/bardsong/c0bardx.spl").write_bytes(
+                song_loader_with_layout(0x72, 0x9A, effect_count=0xFFFE)
+            )
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.count("skipping C0BARDX.SPL at the 65535-effect capacity limit"))
+            outputs = (song, alternate)
+            changed, = [path for path in outputs if path.read_bytes() != original]
+            pulse = next(e.resource for e in parse_spl(changed).abilities[0].effects if e.opcode == 272)
+            loader = resource(override, "C0BARDX.SPL")
+            self.assertEqual(0xFFFF, struct.unpack_from("<H", loader.read_bytes(), 0x90)[0])
+            self.assertEqual(pulse, parse_spl(loader).abilities[0].effects[-1].resource)
 
     def test_projectile_donor_requires_all_type_specific_blocks(self) -> None:
         source = (MOD / "bardsong/c0bardso.PRO").read_bytes()

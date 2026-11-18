@@ -12,8 +12,9 @@ END
 
 DEFINE_PATCH_FUNCTION c0bw_validate_spl
   INT_VAR insertions_per_ability = 0
-  RET c0bw_valid
+  RET c0bw_valid c0bw_capacity
 BEGIN
+  SET c0bw_capacity = 0
   LPF c0bw_has_header INT_VAR minimum_size = 0x72 STR_VAR signature = ~SPL V1  ~ RET c0bw_valid END
   PATCH_IF c0bw_valid BEGIN
     READ_LONG 0x64 ability_table
@@ -37,6 +38,7 @@ BEGIN
       SET effect_slots = (SOURCE_SIZE - effect_table) / 0x30
       SET max_effect_end = 0
       SET max_ability_end = 0
+      SET total_count = global_count
       PATCH_IF global_count > 0 BEGIN
         SET max_effect_end = global_first + global_count
       END
@@ -45,6 +47,7 @@ BEGIN
         SET ability = ability_table + i * 0x28
         READ_SHORT (ability + 0x1E) effect_count
         READ_SHORT (ability + 0x20) first_effect
+        SET total_count += effect_count
         PATCH_IF effect_count > 0 BEGIN
           SET effect_end = first_effect + effect_count
           SET c0bw_valid = effect_end <= effect_slots
@@ -64,45 +67,42 @@ BEGIN
           SET max_effect_end = effect_end > max_effect_end ? effect_end : max_effect_end
         END
       END
-      PATCH_IF c0bw_valid AND insertions_per_ability > 0 BEGIN
-        SET c0bw_valid = ability_count > 0
-          AND max_effect_end + ability_count * insertions_per_ability <= 0x10000
+      PATCH_IF c0bw_valid BEGIN
+        SET c0bw_capacity = total_count + ability_count * insertions_per_ability > 0xFFFF
+        SET c0bw_valid = NOT c0bw_capacity AND (insertions_per_ability = 0 OR ability_count > 0)
       END
     END
   END
 END
 
-// A zero-count ability has no effect span. ADD_SPELL_EFFECT still uses its
-// index as an insertion point. Use the last referenced slot plus one for all
-// empty abilities, independent of unused indices or bytes after the effects.
-DEFINE_PATCH_FUNCTION c0bw_prepare_effect_insertion
-  INT_VAR selected_header = 0
+// Bucket zero is the casting slice. The remaining buckets are in ability
+// order, even when their physical records are stored in a different order.
+DEFINE_PATCH_FUNCTION c0bw_read_effect_slices
+  RET ability_table ability_count effect_table total_count last_effect
+  RET_ARRAY c0bw_first c0bw_count
 BEGIN
-  READ_SHORT 0x6E casting_first
-  READ_SHORT 0x70 casting_count
-  SET append_index = casting_count > 0 ? casting_first + casting_count : 0
-  SET casting_shift = 0
-  GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
-  PHP_EACH song_headers AS header_index => header BEGIN
-    READ_SHORT (header + 0x1E) effect_count
-    READ_SHORT (header + 0x20) first_effect
-    PATCH_IF effect_count > 0 BEGIN
-      SET effect_end = first_effect + effect_count
-      SET append_index = effect_end > append_index ? effect_end : append_index
-      // WeiDU moves ability indices after insertion but leaves +0x6E alone.
-      PATCH_IF casting_count > 0 AND effect_end <= casting_first
-        AND (selected_header = 0 OR selected_header = header_index + 1) BEGIN
-        SET casting_shift += 1
-      END
+  READ_LONG 0x64 ability_table
+  READ_SHORT 0x68 ability_count
+  READ_LONG 0x6A effect_table
+  SET total_count = 0
+  SET last_effect = 0
+  PATCH_CLEAR_ARRAY c0bw_first
+  PATCH_CLEAR_ARRAY c0bw_count
+  FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+    PATCH_IF bucket = 0 BEGIN
+      READ_SHORT 0x6E first
+      READ_SHORT 0x70 count
+    END ELSE BEGIN
+      SET header = ability_table + (bucket - 1) * 0x28
+      READ_SHORT (header + 0x20) first
+      READ_SHORT (header + 0x1E) count
     END
-  END
-  PHP_EACH song_headers AS header_index => header BEGIN
-    PATCH_IF SHORT_AT (header + 0x1E) = 0 BEGIN
-      WRITE_SHORT (header + 0x20) append_index
+    SET $c0bw_first(~%bucket%~) = first
+    SET $c0bw_count(~%bucket%~) = count
+    SET total_count += count
+    PATCH_IF count > 0 AND first + count > last_effect BEGIN
+      SET last_effect = first + count
     END
-  END
-  PATCH_IF casting_shift > 0 BEGIN
-    WRITE_SHORT 0x6E (casting_first + casting_shift)
   END
 END
 
@@ -114,17 +114,31 @@ DEFINE_PATCH_MACRO c0bw_record_damage BEGIN
   SET $c0bw_damaged_resources(~%damaged_file%~) = 1
 END
 
+DEFINE_PATCH_MACRO c0bw_record_capacity BEGIN
+  SPRINT capacity_file ~%SOURCE_FILE%~
+  TO_UPPER capacity_file
+  SET $c0bw_damaged_resources(~%capacity_file%~) = 2
+END
+
 DEFINE_PATCH_MACRO c0bw_guard_spl BEGIN
-  LPF c0bw_validate_spl RET c0bw_valid END
+  LPF c0bw_validate_spl RET c0bw_valid c0bw_capacity END
   PATCH_IF NOT c0bw_valid BEGIN
-    LPM c0bw_record_damage
+    PATCH_IF c0bw_capacity BEGIN
+      LPM c0bw_record_capacity
+    END ELSE BEGIN
+      LPM c0bw_record_damage
+    END
   END
 END
 
 DEFINE_PATCH_MACRO c0bw_guard_song_loader BEGIN
-  LPF c0bw_validate_spl INT_VAR insertions_per_ability = 1 RET c0bw_valid END
+  LPF c0bw_validate_spl INT_VAR insertions_per_ability = 1 RET c0bw_valid c0bw_capacity END
   PATCH_IF NOT c0bw_valid BEGIN
-    LPM c0bw_record_damage
+    PATCH_IF c0bw_capacity BEGIN
+      LPM c0bw_record_capacity
+    END ELSE BEGIN
+      LPM c0bw_record_damage
+    END
   END
 END
 
@@ -151,35 +165,244 @@ DEFINE_PATCH_MACRO c0bw_guard_projectile BEGIN
   END
 END
 
-DEFINE_PATCH_FUNCTION c0bw_link_song_assignment
-  STR_VAR bardsong_name = "" song_name = ""
+// Repack the referenced effect region in casting/ability order. The header
+// and ability-table locations, and bytes beyond the last effect, stay put.
+DEFINE_PATCH_FUNCTION c0bw_write_effect_slices
+  INT_VAR ability_table = 0 ability_count = 0 effect_table = 0 last_effect = 0 new_total = 0
 BEGIN
-  LPF CLONE_EFFECT INT_VAR silent = 1 match_opcode = 251 opcode = 326 target = 2
-    parameter2 = 0 parameter1 = 0 timing = 1
-    STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = ~C0BARDX~
-  END
-  LPF CLONE_EFFECT INT_VAR silent = 1 match_opcode = 251 opcode = 309 target = 2
-    parameter2 = 0 parameter1 = 1 timing = 4 duration = 1
-    STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~
+  DELETE_BYTES effect_table (last_effect * 0x30)
+  INSERT_BYTES effect_table (new_total * 0x30)
+  SET first = 0
+  FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+    SPRINT records $c0bw_output(~%bucket%~)
+    SET bytes = STRING_LENGTH ~%records%~
+    SET count = bytes / 0x30
+    PATCH_IF bucket = 0 BEGIN
+      WRITE_SHORT 0x6E 0
+      WRITE_SHORT 0x70 count
+    END ELSE BEGIN
+      SET header = ability_table + (bucket - 1) * 0x28
+      WRITE_SHORT (header + 0x20) first
+      WRITE_SHORT (header + 0x1E) count
+    END
+    PATCH_IF bytes > 0 BEGIN
+      WRITE_ASCIIE (effect_table + first * 0x30) ~%records%~ (bytes)
+    END
+    SET first += count
   END
 END
 
-// Match the original trigger: visit direct opcode-251 records in ability
-// effects and apply both clones for each encounter. The cloned effects still
-// match the selected song resref, including when the trigger names another song.
-DEFINE_PATCH_FUNCTION c0bw_link_external_song_assignment
-  STR_VAR bardsong_name = "" song_name = ""
+DEFINE_PATCH_FUNCTION c0bw_write_song_effect
+  INT_VAR offset = 0 opcode = 0 target = 1 timing = 1 duration = 0 parameter2 = 0
+  STR_VAR resource = ""
 BEGIN
-  READ_LONG 0x64 ability_table
-  READ_SHORT 0x68 ability_count
-  READ_LONG 0x6A effect_table
-  FOR (ability_index = 0; ability_index < ability_count; ++ability_index) BEGIN
-    SET ability = ability_table + 0x28 * ability_index
-    READ_SHORT (ability + 0x1E) effect_count
-    READ_SHORT (ability + 0x20) first_effect
-    FOR (index = first_effect; index < first_effect + effect_count; ++index) BEGIN
-      PATCH_IF SHORT_AT (effect_table + 0x30 * index) = 251 BEGIN
-        LPF c0bw_link_song_assignment STR_VAR bardsong_name song_name END
+  WRITE_SHORT offset opcode
+  WRITE_BYTE (offset + 2) target
+  WRITE_LONG (offset + 8) parameter2
+  WRITE_BYTE (offset + 0x0C) timing
+  WRITE_LONG (offset + 0x0E) duration
+  WRITE_BYTE (offset + 0x12) 100
+  WRITE_ASCIIE (offset + 0x14) ~%resource%~ (8)
+END
+
+// Append one effect per ability. Symphony also adds a level-specific finale
+// to its first eleven abilities. Remove presentation effects only from the
+// separate invisibility spell's ability slices.
+DEFINE_PATCH_FUNCTION c0bw_extend_song_effects
+  INT_VAR opcode = 309 target = 1 timing = 1 duration = 0 parameter2 = 0
+    strip_messages = 0 symphony = 0
+  STR_VAR resource = ""
+  RET c0bw_extended
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  LPF c0bw_read_effect_slices RET ability_table ability_count effect_table last_effect
+    RET_ARRAY c0bw_first c0bw_count
+  END
+  SET c0bw_extended = 0
+  SET new_total = 0
+  PATCH_CLEAR_ARRAY c0bw_output
+  FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+    SET first = $c0bw_first(~%bucket%~)
+    SET count = $c0bw_count(~%bucket%~)
+    SPRINT records ~~
+    PATCH_IF count > 0 BEGIN
+      READ_ASCII (effect_table + first * 0x30) records (count * 0x30)
+    END
+    PATCH_IF bucket > 0 BEGIN
+      INNER_PATCH_SAVE records ~%records%~ BEGIN
+        PATCH_IF strip_messages BEGIN
+          FOR (i = count - 1; i >= 0; --i) BEGIN
+            READ_SHORT (i * 0x30) old_opcode
+            PATCH_IF old_opcode = 139 OR old_opcode = 136 BEGIN
+              DELETE_BYTES (i * 0x30) 0x30
+            END
+          END
+        END
+        SET append_at = BUFFER_LENGTH
+        INSERT_BYTES append_at 0x30
+        LPF c0bw_write_song_effect
+          INT_VAR offset = append_at opcode target timing duration parameter2
+          STR_VAR resource
+        END
+        PATCH_IF symphony AND bucket <= 11 BEGIN
+          SET append_at = BUFFER_LENGTH
+          INSERT_BYTES append_at 0x30
+          LPF c0bw_write_song_effect INT_VAR offset = append_at opcode = 326 target = 9 timing = 4
+            duration = (600 + (bucket - 1) * 100 + 14) / 15
+            STR_VAR resource = ~C0ABIVI~
+          END
+        END
+      END
+    END
+    SPRINT $c0bw_output(~%bucket%~) ~%records%~
+    SET new_total += STRING_LENGTH ~%records%~ / 0x30
+  END
+  PATCH_IF new_total <= 0xFFFF BEGIN
+    LPF c0bw_write_effect_slices INT_VAR ability_table ability_count effect_table last_effect new_total END
+    SET c0bw_extended = 1
+  END ELSE BEGIN
+    LPM c0bw_record_capacity
+  END
+END
+
+// Replay the legacy direct-op251 traversal without moving the records it
+// visits. Each pass adds a pair before every match; count that displacement
+// within each ability and stop as soon as the plan exceeds the available slots.
+DEFINE_PATCH_FUNCTION c0bw_assignment_passes
+  INT_VAR ability_count = 0 effect_table = 0 limit = 0
+  STR_VAR bardsong_name = ""
+  RET passes
+BEGIN
+  SET passes = 0
+  FOR (bucket = 1; bucket <= ability_count AND passes <= limit; ++bucket) BEGIN
+    SET first = $c0bw_first(~%bucket%~)
+    SET count = $c0bw_count(~%bucket%~)
+    SET snapshot_count = count + 2 * passes * $c0bw_matches(~%bucket%~)
+    SET leading_matches = 0
+    FOR (i = 0; i < count AND passes <= limit; ++i) BEGIN
+      SET offset = effect_table + (first + i) * 0x30
+      PATCH_IF SHORT_AT offset = 251 BEGIN
+        READ_ASCII (offset + 0x14) assigned (8) NULL
+        PATCH_IF ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
+          SET leading_matches += 1
+        END
+        PATCH_IF i + 2 * passes * leading_matches < snapshot_count BEGIN
+          SET passes += 1
+          WHILE leading_matches > 0 AND passes <= limit AND i + 2 * passes * leading_matches < snapshot_count BEGIN
+            SET passes += 1
+          END
+        END
+      END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION c0bw_add_assignment_links
+  INT_VAR external = 0
+  STR_VAR bardsong_name = "" song_name = ""
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  PATCH_IF INDEX_BUFFER (CASE_INSENSITIVE EXACT_MATCH ~%bardsong_name%~) >= 0 BEGIN
+    LPF c0bw_read_effect_slices RET ability_table ability_count effect_table total_count last_effect
+      RET_ARRAY c0bw_first c0bw_count
+    END
+    SET matches = 0
+    PATCH_CLEAR_ARRAY c0bw_matches
+    FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+      SET first = $c0bw_first(~%bucket%~)
+      SET count = $c0bw_count(~%bucket%~)
+      SET bucket_matches = 0
+      FOR (i = 0; i < count; ++i) BEGIN
+        SET offset = effect_table + (first + i) * 0x30
+        PATCH_IF SHORT_AT offset = 251 BEGIN
+          READ_ASCII (offset + 0x14) assigned (8) NULL
+          PATCH_IF ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
+            SET bucket_matches += 1
+          END
+        END
+      END
+      SET $c0bw_matches(~%bucket%~) = bucket_matches
+      SET matches += bucket_matches
+    END
+    PATCH_IF matches > 0 BEGIN
+      SET limit = (0xFFFF - total_count) / (2 * matches)
+      SET passes = 1
+      PATCH_IF external BEGIN
+        LPF c0bw_assignment_passes INT_VAR ability_count effect_table limit STR_VAR bardsong_name RET passes END
+      END
+      PATCH_IF passes > limit BEGIN
+        LPM c0bw_record_capacity
+      END ELSE PATCH_IF passes > 0 BEGIN
+        PATCH_CLEAR_ARRAY c0bw_output
+        FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+          SET first = $c0bw_first(~%bucket%~)
+          SET count = $c0bw_count(~%bucket%~)
+          SPRINT records ~~
+          PATCH_IF count > 0 BEGIN
+            READ_ASCII (effect_table + first * 0x30) records (count * 0x30)
+          END
+          PATCH_IF $c0bw_matches(~%bucket%~) > 0 BEGIN
+            INNER_PATCH_SAVE records ~%records%~ BEGIN
+              FOR (i = count - 1; i >= 0; --i) BEGIN
+                SET offset = i * 0x30
+                PATCH_IF SHORT_AT offset = 251 BEGIN
+                  READ_ASCII (offset + 0x14) assigned (8) NULL
+                  PATCH_IF ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
+                    READ_ASCII offset original (0x30)
+                    INSERT_BYTES offset (passes * 0x60)
+                    FOR (pass = 0; pass < passes; ++pass) BEGIN
+                      SET clone = offset + pass * 0x60
+                      WRITE_ASCIIE clone ~%original%~ (0x30)
+                      WRITE_SHORT clone 326
+                      WRITE_BYTE (clone + 2) 2
+                      WRITE_LONG (clone + 4) 0
+                      WRITE_LONG (clone + 8) 0
+                      WRITE_BYTE (clone + 0x0C) 1
+                      WRITE_ASCII (clone + 0x14) ~C0BARDX~ (8)
+                      SET clone += 0x30
+                      WRITE_ASCIIE clone ~%original%~ (0x30)
+                      WRITE_SHORT clone 309
+                      WRITE_BYTE (clone + 2) 2
+                      WRITE_LONG (clone + 4) 1
+                      WRITE_LONG (clone + 8) 0
+                      WRITE_BYTE (clone + 0x0C) 4
+                      WRITE_LONG (clone + 0x0E) 1
+                      WRITE_ASCIIE (clone + 0x14) ~%song_name%~ (8)
+                    END
+                  END
+                END
+              END
+            END
+          END
+          SPRINT $c0bw_output(~%bucket%~) ~%records%~
+        END
+        SET new_total = total_count + 2 * matches * passes
+        LPF c0bw_write_effect_slices INT_VAR ability_table ability_count effect_table last_effect new_total END
+      END
+    END
+  END
+END
+
+// Fixed-width edits need only the declared slices.
+DEFINE_PATCH_FUNCTION c0bw_alter_song_effects
+  INT_VAR match_opcode = ~-1~ parameter1 = 0
+  STR_VAR match_resource = "" resource = ""
+BEGIN
+  LPF c0bw_read_effect_slices RET ability_count effect_table RET_ARRAY c0bw_first c0bw_count END
+  FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+    SET first = $c0bw_first(~%bucket%~)
+    SET count = $c0bw_count(~%bucket%~)
+    FOR (i = 0; i < count; ++i) BEGIN
+      SET offset = effect_table + (first + i) * 0x30
+      PATCH_IF match_opcode >= 0 BEGIN
+        PATCH_IF SHORT_AT offset = match_opcode BEGIN
+          WRITE_LONG (offset + 4) parameter1
+        END
+      END ELSE BEGIN
+        READ_ASCII (offset + 0x14) existing (8) NULL
+        PATCH_IF ~%existing%~ STRING_EQUAL_CASE ~%match_resource%~ BEGIN
+          WRITE_ASCIIE (offset + 0x14) ~%resource%~ (8)
+        END
       END
     END
   END
@@ -261,9 +484,9 @@ BEGIN
     END
 
     COPY_EXISTING ~C0BARDX.SPL~ ~override~
-      LPF c0bw_prepare_effect_insertion END
-      LPF ADD_SPELL_EFFECT INT_VAR opcode = 309 target = 1 timing = 1
+      LPF c0bw_extend_song_effects
         STR_VAR resource = EVAL ~%song_name%~
+        RET_ARRAY c0bw_damaged_resources
       END
 
     // Update explicit opcode-251 references to this song, including external
@@ -271,10 +494,8 @@ BEGIN
     COPY_EXISTING_REGEXP GLOB ~.*[.]spl~ ~override~
       LPM c0bw_guard_spl
       PATCH_IF c0bw_valid BEGIN
-        PATCH_IF preserve_projectiles BEGIN
-          LPF c0bw_link_external_song_assignment STR_VAR bardsong_name song_name END
-        END ELSE BEGIN
-          LPF c0bw_link_song_assignment STR_VAR bardsong_name song_name END
+        LPF c0bw_add_assignment_links INT_VAR external = preserve_projectiles
+          STR_VAR bardsong_name song_name RET_ARRAY c0bw_damaged_resources
         END
       END
     BUT_ONLY
@@ -285,12 +506,12 @@ BEGIN
       END ELSE BEGIN
         LPF ALTER_SPELL_HEADER INT_VAR projectile = payload_projectile END
       END
-      LPF ALTER_EFFECT INT_VAR silent = 1
+      LPF c0bw_alter_song_effects
         STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~
       END
     COPY ~%MOD_FOLDER%/bardsong/c0bardso.spl~ ~override/%bardsong_name%.SPL~
       LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bardso END
-      LPF ALTER_EFFECT INT_VAR silent = 1 STR_VAR match_resource = BARDSONG resource = EVAL ~%song_name%~ END
+      LPF c0bw_alter_song_effects STR_VAR match_resource = ~BARDSONG~ resource = EVAL ~%song_name%~ END
     COPY ~%MOD_FOLDER%/bardsong/c0bardso.eff~ ~override/%song_name%.EFF~
       WRITE_ASCIIE 0x30 ~%song_name%~ (8)
 

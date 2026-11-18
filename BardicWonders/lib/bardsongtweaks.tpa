@@ -75,7 +75,7 @@ ACTION_PHP_EACH c0bw_song_messages AS spell => message BEGIN
   BUT_ONLY
   ACTION_IF c0bw_valid BEGIN
     COPY ~%MOD_FOLDER%/bardsong/%spell%.spl~ ~override~
-      LPF ALTER_EFFECT INT_VAR match_opcode = 139 parameter1 = RESOLVE_STR_REF (~%message%~) END
+      LPF c0bw_alter_song_effects INT_VAR match_opcode = 139 parameter1 = RESOLVE_STR_REF (~%message%~) END
   END
 END
 COPY ~%MOD_FOLDER%/bardsong/c0brdef1.bam~ OVERRIDE
@@ -102,7 +102,7 @@ ACTION_IF FILE_EXISTS_IN_GAME ~C0BWHL8.spl~ THEN BEGIN
   COPY_EXISTING ~C0BWHL8.SPL~ ~override~
     LPM c0bw_guard_spl
     PATCH_IF c0bw_valid BEGIN
-      LPF ALTER_EFFECT INT_VAR match_opcode = 99 parameter1 = 130 END
+      LPF c0bw_alter_song_effects INT_VAR match_opcode = 99 parameter1 = 130 END
     END
   BUT_ONLY
 END
@@ -198,11 +198,26 @@ ACTION_IF c0bw_song_loader_ready BEGIN
   INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
   LAF c0bw_wrap_external_songs RET_ARRAY c0bw_damaged_resources END
 END
-ACTION_PHP_EACH c0bw_damaged_resources AS damaged_file => unused BEGIN
-  PRINT ~Bardic Wonders #2004: skipping damaged %damaged_file%.~
+ACTION_PHP_EACH c0bw_damaged_resources AS damaged_file => reason BEGIN
+  ACTION_IF reason = 2 BEGIN
+    PRINT ~Bardic Wonders #2004: skipping %damaged_file% at the 65535-effect capacity limit.~
+  END ELSE BEGIN
+    PRINT ~Bardic Wonders #2004: skipping damaged %damaged_file%.~
+  END
 END
 INCLUDE ~%MOD_FOLDER%/lib/bardsong_description.tpa~
-LAF c0bw_write_song_description END
+ACTION_IF c0bw_song_loader_ready BEGIN
+  // Companion options can run in a later WeiDU process. WeiDU owns and
+  // uninstalls this marker with the finite-song component.
+  <<<<<<<< .../inlined/c0bw-song-state.2da
+2DA V1.0
+0
+      FINITE
+STATE 1
+>>>>>>>>
+  COPY ~.../inlined/c0bw-song-state.2da~ ~override/C0BWSYS.2DA~
+  LAF c0bw_write_song_description END
+END
 
 COPY_EXISTING ~enginest.2da~ ~override~
   COUNT_2DA_ROWS 2 rows
