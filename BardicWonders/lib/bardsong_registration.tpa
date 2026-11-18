@@ -299,76 +299,137 @@ DEFINE_PATCH_MACRO c0bw_guard_core_asset BEGIN
   END
 END
 
-// Read both reserved numbers and named rows. WeiDU accepts hexadecimal
-// IDs and bare numeric rows, and neither table is guaranteed to be sorted.
+// Lex the scratch copy before reading IDS rows. In WeiDU 249, a line
+// comment ends at LF, while block comments nest and ignore line markers.
+DEFINE_PATCH_FUNCTION c0bw_strip_ids_comments
+  RET ids_complete
+BEGIN
+  SET cursor = 0
+  SET comment_depth = 0
+  SET state = 0
+  WHILE state != 3 BEGIN
+    PATCH_MATCH state WITH
+      0 BEGIN // NORMAL
+        SET comment_start = ~-1~
+        PATCH_IF cursor < BUFFER_LENGTH BEGIN SET comment_start = INDEX_BUFFER (~//\|/\*~ cursor) END
+        PATCH_IF comment_start < 0 BEGIN
+          SET state = 3
+        END ELSE BEGIN
+          SET cursor = comment_start + 2
+          PATCH_IF BYTE_AT (comment_start + 1) = 0x2F BEGIN
+            SET state = 1
+          END ELSE BEGIN
+            SET state = 2
+            SET comment_depth = 1
+          END
+        END
+      END
+      1 BEGIN // LINE_COMMENT
+        SET comment_end = BUFFER_LENGTH
+        PATCH_IF cursor < BUFFER_LENGTH BEGIN
+          SET newline = INDEX_BUFFER (EXACT_MATCH ~%LNL%~ cursor)
+          PATCH_IF newline >= 0 BEGIN SET comment_end = newline END
+        END
+        DELETE_BYTES comment_start (comment_end - comment_start - 1)
+        WRITE_BYTE comment_start 0x20
+        SET cursor = comment_start + 1
+        SET state = 0
+      END
+      2 BEGIN // BLOCK_COMMENT
+        SET marker = ~-1~
+        PATCH_IF cursor < BUFFER_LENGTH BEGIN SET marker = INDEX_BUFFER (~/\*\|\*/~ cursor) END
+        PATCH_IF marker < 0 BEGIN
+          SET state = 3
+        END ELSE BEGIN
+          SET cursor = marker + 2
+          PATCH_IF BYTE_AT marker = 0x2F BEGIN
+            SET comment_depth += 1
+          END ELSE BEGIN
+            SET comment_depth -= 1
+            PATCH_IF comment_depth = 0 BEGIN
+              // A comment between tokens is whitespace, including when
+              // the block itself spans multiple physical lines.
+              DELETE_BYTES comment_start (cursor - comment_start - 1)
+              WRITE_BYTE comment_start 0x20
+              SET cursor = comment_start + 1
+              SET state = 0
+            END
+          END
+        END
+      END
+      DEFAULT SET state = 3
+    END
+  END
+  SET ids_complete = comment_depth = 0
+END
+
+// Skip header text and a leading standalone entry count. Numeric-only
+// rows after the header still reserve their IDs, as WeiDU's aligner does.
 DEFINE_PATCH_FUNCTION c0bw_scan_projectile_ids
   INT_VAR record_symbols = 0
-  RET max_id
+  RET max_id ids_complete
   RET_ARRAY c0bw_projectile_ids
 BEGIN
   SET max_id = ~-1~
-  READ_2DA_ENTRIES_NOW numeric_rows 1
-  FOR (row = 0; row < numeric_rows; ++row) BEGIN
-    READ_2DA_ENTRY_FORMER numeric_rows row 0 id
-    PATCH_IF IS_AN_INT id BEGIN
-      PATCH_IF id > max_id BEGIN SET max_id = id END
-    END
-  END
-  PATCH_IF record_symbols BEGIN
-    PATCH_CLEAR_ARRAY c0bw_projectile_ids
-    READ_2DA_ENTRIES_NOW named_rows 2
-    FOR (row = 0; row < named_rows; ++row) BEGIN
-      READ_2DA_ENTRY_FORMER named_rows row 0 id
+  LPF c0bw_strip_ids_comments RET ids_complete END
+  PATCH_IF record_symbols BEGIN PATCH_CLEAR_ARRAY c0bw_projectile_ids END
+  PATCH_IF ids_complete BEGIN
+    SET header = 1
+    READ_2DA_ENTRIES_NOW ids_rows 1
+    FOR (row = 0; row < ids_rows; ++row) BEGIN
+      READ_2DA_ENTRY_FORMER ids_rows row 0 id
       PATCH_IF IS_AN_INT id BEGIN
-        READ_2DA_ENTRY_FORMER named_rows row 1 symbol
-        TO_UPPER symbol
-        SET $c0bw_projectile_ids(~%symbol%~) = id
+        SET named = VARIABLE_IS_SET EVAL ~ids_rows_%row%_1~
+        PATCH_IF NOT header OR named BEGIN
+          PATCH_IF id > max_id BEGIN SET max_id = id END
+          PATCH_IF record_symbols AND named BEGIN
+            READ_2DA_ENTRY_FORMER ids_rows row 1 symbol
+            TO_UPPER symbol
+            SET $c0bw_projectile_ids(~%symbol%~) = id
+          END
+        END
+        SET header = 0
       END
     END
   END
 END
 
 DEFINE_ACTION_FUNCTION c0bw_read_projectile_index
-  RET max_projectile max_missile
+  RET projectile_base index_ready
   RET_ARRAY c0bw_projectile_ids
 BEGIN
   OUTER_SET max_projectile = ~-1~
   OUTER_SET max_missile = ~-1~
+  OUTER_SET projectl_complete = 0
+  OUTER_SET missile_complete = 1
   ACTION_CLEAR_ARRAY c0bw_projectile_ids
   ACTION_IF FILE_EXISTS_IN_GAME ~PROJECTL.IDS~ BEGIN
-    COPY_EXISTING ~PROJECTL.IDS~ ~override~
+    COPY_EXISTING - ~PROJECTL.IDS~ ~.../c0bw-inlined/projectl-index.ids~
       LPF c0bw_scan_projectile_ids INT_VAR record_symbols = 1
-        RET max_projectile = max_id RET_ARRAY c0bw_projectile_ids
+        RET max_projectile = max_id projectl_complete = ids_complete RET_ARRAY c0bw_projectile_ids
       END
-    BUT_ONLY
   END
   ACTION_IF FILE_EXISTS_IN_GAME ~MISSILE.IDS~ BEGIN
-    COPY_EXISTING ~MISSILE.IDS~ ~override~
-      LPF c0bw_scan_projectile_ids RET max_missile = max_id END
-    BUT_ONLY
+    COPY_EXISTING - ~MISSILE.IDS~ ~.../c0bw-inlined/missile-index.ids~
+      LPF c0bw_scan_projectile_ids RET max_missile = max_id missile_complete = ids_complete END
   END
+  OUTER_SET index_ready = projectl_complete AND missile_complete AND max_projectile >= 0
+  OUTER_SET projectile_base = max_projectile >= max_missile - 1 ? max_projectile : max_missile - 1
 END
 
-// The caller has reserved the required word-sized projectile fields. Both
-// stock and private PROs append after the whole PROJECTL ID space.
+// The caller checked capacity for the aligned pair. An aligned tail also
+// lets a later WeiDU ADD_PROJECTILE continue without filling any gaps.
 DEFINE_ACTION_FUNCTION c0bw_append_projectile
-  INT_VAR max_projectile = ~-1~ max_missile = ~-1~
+  INT_VAR projectile_base = ~-1~
   STR_VAR symbol = "" missile_name = ""
-  RET max_projectile max_missile projectile
+  RET projectile_base projectile
 BEGIN
-  OUTER_SET max_projectile += 1
-  OUTER_SET projectile = max_projectile + 1
-  APPEND ~PROJECTL.IDS~ ~%max_projectile% %symbol%~
+  OUTER_SET projectile_base += 1
+  OUTER_SET projectile = projectile_base + 1
+  APPEND ~PROJECTL.IDS~ ~%projectile_base% %symbol%~
   ACTION_IF FILE_EXISTS_IN_GAME ~MISSILE.IDS~ BEGIN
-    OUTER_SET max_missile += 1
-    // Stock BG2:EE and IWD:EE associate the missile label with the SPL
-    // projectile field. Skip gaps instead of adding WeiDU's dummy rows.
-    // On already divergent lists, preserve existing rows and avoid reuse.
-    ACTION_IF FILE_EXISTS_IN_GAME ~FIREBALL.IDS~ AND max_missile < projectile BEGIN
-      OUTER_SET max_missile = projectile
-    END
     ACTION_IF ~%missile_name%~ STRING_EQUAL ~~ BEGIN OUTER_SPRINT missile_name ~%symbol%~ END
-    APPEND ~MISSILE.IDS~ ~%max_missile% %missile_name%~
+    APPEND ~MISSILE.IDS~ ~%projectile% %missile_name%~
   END
   CLEAR_IDS_MAP
 END
@@ -403,14 +464,14 @@ BEGIN
     BUT_ONLY
   END
   ACTION_IF ready AND asset_type = 3 BEGIN
-    LAF c0bw_read_projectile_index RET max_projectile max_missile RET_ARRAY c0bw_projectile_ids END
+    LAF c0bw_read_projectile_index RET projectile_base index_ready RET_ARRAY c0bw_projectile_ids END
     ACTION_TO_UPPER asset
     OUTER_SET already_registered = VARIABLE_IS_SET $c0bw_projectile_ids(~%asset%~)
     ACTION_IF already_registered BEGIN
       OUTER_SET existing_id = $c0bw_projectile_ids(~%asset%~)
       OUTER_SET ready = existing_id >= 1 AND existing_id <= 0xFFFE
     END ELSE BEGIN
-      OUTER_SET ready = max_projectile >= 0 AND max_projectile < 0xFFFE
+      OUTER_SET ready = index_ready AND projectile_base < 0xFFFE
     END
     ACTION_IF NOT ready BEGIN
       PRINT ~Bardic Wonders #2004: no projectile IDs available for %filename%.~
@@ -428,7 +489,7 @@ BEGIN
       WRITE_LONG 0x0C (THIS BOR 0x40)
     BUT_ONLY
     ACTION_IF NOT already_registered BEGIN
-      LAF c0bw_append_projectile INT_VAR max_projectile max_missile STR_VAR symbol = EVAL ~%asset%~ missile_name END
+      LAF c0bw_append_projectile INT_VAR projectile_base STR_VAR symbol = EVAL ~%asset%~ missile_name END
     END
   END
 END
@@ -768,21 +829,20 @@ END
 
 DEFINE_ACTION_FUNCTION c0bw_check_projectile_capacity
   INT_VAR donor_count = 0
-  RET ids_ready max_projectile max_missile
+  RET ids_ready projectile_base
 BEGIN
   OUTER_SET ids_ready = 1
-  OUTER_SET max_projectile = ~-1~
-  OUTER_SET max_missile = ~-1~
+  OUTER_SET projectile_base = ~-1~
   ACTION_IF donor_count > 0 BEGIN
-    LAF c0bw_read_projectile_index RET max_projectile max_missile END
-    OUTER_SET ids_ready = max_projectile >= 0 AND max_projectile <= 0xFFFE - donor_count
+    LAF c0bw_read_projectile_index RET projectile_base index_ready END
+    OUTER_SET ids_ready = index_ready AND projectile_base <= 0xFFFE - donor_count
   END
 END
 
 // The entire plan has passed validation. Share a private copy among all
 // abilities that had the same donor ID.
 DEFINE_PATCH_FUNCTION c0bw_register_external_projectiles
-  INT_VAR max_projectile = ~-1~ max_missile = ~-1~
+  INT_VAR projectile_base = ~-1~
 BEGIN
   PATCH_CLEAR_ARRAY c0bw_external_projectiles
   GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
@@ -801,9 +861,9 @@ BEGIN
           OUTER_SET c0bw_projectile_serial += 1
           COPY_EXISTING ~%original_projectile%.PRO~ ~override/%private_projectile%.PRO~
             WRITE_LONG 0x0c (THIS BOR 0x40)
-          LAF c0bw_append_projectile INT_VAR max_projectile max_missile
+          LAF c0bw_append_projectile INT_VAR projectile_base
             STR_VAR symbol = EVAL ~%private_projectile%~
-            RET max_projectile max_missile projectile
+            RET projectile_base projectile
           END
           OUTER_SET $c0bw_external_projectiles(~%original_id%~) = projectile
         END
@@ -877,7 +937,7 @@ BEGIN
 
     OUTER_SET ids_ready = 1
     ACTION_IF preserve_projectiles AND payload_ready BEGIN
-      LAF c0bw_check_projectile_capacity INT_VAR donor_count RET ids_ready max_projectile max_missile END
+      LAF c0bw_check_projectile_capacity INT_VAR donor_count RET ids_ready projectile_base END
       ACTION_IF NOT ids_ready BEGIN
         PRINT ~Bardic Wonders #2004: no projectile IDs available for %bardsong_name%.SPL.~
       END
@@ -911,7 +971,7 @@ BEGIN
     BUT_ONLY
 
     COPY ~.../c0bw-inlined/payload.spl~ ~override/%song_name%.SPL~
-      PATCH_IF preserve_projectiles BEGIN LPF c0bw_register_external_projectiles INT_VAR max_projectile max_missile END END
+      PATCH_IF preserve_projectiles BEGIN LPF c0bw_register_external_projectiles INT_VAR projectile_base END END
     COPY ~.../c0bw-inlined/pulse.eff~ ~override/%song_name%.EFF~
     COPY ~.../c0bw-inlined/controller.spl~ ~override/%bardsong_name%.SPL~
 

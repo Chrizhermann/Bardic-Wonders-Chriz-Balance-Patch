@@ -1250,6 +1250,112 @@ class Component2004ProducerTests(unittest.TestCase):
                              missile.read_text().splitlines()[-4:])
             self.assertIn("525 Taken label", missile.read_text().splitlines())
 
+    def seed_projectile_registry(self, override: Path, projectl: bytes, missile: bytes) -> tuple[Path, Path]:
+        ids = resource(override, "PROJECTL.IDS")
+        ids.write_bytes(
+            b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n523 C0BWSNP\r\n" + projectl
+        )
+        missiles = resource(override, "MISSILE.IDS")
+        missiles.write_bytes(b"IDS V1.0\r\n0 NONE\r\n" + missile)
+        return ids, missiles
+
+    def assert_projectile_pair(self, song: Path, ids: Path, missiles: Path, expected: int) -> None:
+        self.assertEqual(f"{expected} C0P0", ids.read_text().splitlines()[-1])
+        if missiles.exists():
+            self.assertEqual(f"{expected + 1} C0P0", missiles.read_text().splitlines()[-1])
+        pulse = parse_spl(song).find_effects(opcode=272)[0].resource
+        self.assertEqual(expected + 1, parse_spl(resource(song.parent, f"{pulse}.SPL")).abilities[0].projectile)
+        self.assertTrue(resource(song.parent, "C0P0.PRO").read_bytes()[0x0C] & 0x40)
+
+    def test_projectile_allocator_lexes_line_and_nested_block_comments(self) -> None:
+        for occupied in (
+            b"/* Mod annotation */ 524 XQTAKEN",
+            b"524 /* cmt */ XQTAKEN",
+            b"/* // */ 524 XQTAKEN",
+            b"524 /* outer\r\n  99999 INSIDE\r\n/* nested */ */ XQTAKEN",
+            b"// /* comment\r\n524 XQTAKEN",
+        ):
+            with self.subTest(occupied=occupied), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                override = root / "override"
+                song, _ = self.seed_external_song_and_bard_text(override)
+                ids, missiles = self.seed_projectile_registry(
+                    override, occupied + b"\r\n// 99999 IGNORED", b"/* // */ 524 Taken label\r\n"
+                )
+                old = bytearray((MOD / "bardsong/c0bardx.spl").read_bytes())
+                ability, = struct.unpack_from("<I", old, 0x64)
+                struct.pack_into("<H", old, ability + 0x26, 525)
+                (override / "XQOLD.SPL").write_bytes(old)
+                taken = resource(override, "INAREAPA.PRO").read_bytes()
+                (override / "XQTAKEN.PRO").write_bytes(taken)
+
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(old, resource(override, "XQOLD.SPL").read_bytes())
+                self.assertEqual(taken, resource(override, "XQTAKEN.PRO").read_bytes())
+                self.assertIn(occupied.decode().replace("\r\n", "\n"), ids.read_text())
+                self.assert_projectile_pair(song, ids, missiles, 525)
+
+    def test_missile_high_water_mark_aligns_with_later_stock_add_projectile(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            ids, missiles = self.seed_projectile_registry(
+                override, b"524 XQTAKEN\r\n", b"/* annotation */ 0x212 XQMISLABEL\r\n// 99999 IGNORED\r\n"
+            )
+            (override / "FIREBALL.IDS").write_bytes(b"IDS V1.0\r\n0 NONE\r\n")
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assert_projectile_pair(song, ids, missiles, 530)
+            self.assertIn("/* annotation */ 0x212 XQMISLABEL", missiles.read_text().splitlines())
+
+            shutil.copyfile(MOD / "bardsong/c0bardso.PRO", root / "XQNEXT.PRO")
+            (root / "lookup.tp2").write_text(
+                "BACKUP ~lookup-backup~\nAUTHOR ~test~\nBEGIN ~Stock projectile registration~\n"
+                "ADD_PROJECTILE ~XQNEXT.PRO~\n"
+                "ACTION_IF XQNEXT != 532 BEGIN FAIL ~Incorrect ADD_PROJECTILE return value~ END\n",
+                encoding="ascii",
+            )
+            stock = subprocess.run(
+                [str(WEIDU), "lookup.tp2", "--no-auto-tp2", "--noautoupdate", "--no-exit-pause",
+                 "--game", str(root), "--language", "0", "--force-install-list", "0"],
+                cwd=root, text=True, capture_output=True, check=False, timeout=60,
+            )
+            self.assertEqual(0, stock.returncode, stock.stdout + stock.stderr)
+            self.assertEqual(["530 C0P0", "531 XQNEXT"], ids.read_text().splitlines()[-2:])
+            self.assertEqual(["531 C0P0", "532 XQNEXT"], missiles.read_text().splitlines()[-2:])
+
+    def test_projectl_high_water_mark_aligns_with_lower_or_absent_missile(self) -> None:
+        for has_missile in (True, False):
+            with self.subTest(has_missile=has_missile), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                override = root / "override"
+                song, _ = self.seed_external_song_and_bard_text(override)
+                ids, missiles = self.seed_projectile_registry(override, b"530 XQTAKEN\r\n", b"524 XQMISLABEL\r\n")
+                if not has_missile:
+                    missiles.unlink()
+
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(has_missile, missiles.exists())
+                self.assert_projectile_pair(song, ids, missiles, 531)
+
+    def test_missile_high_water_mark_capacity_rejects_the_entire_song(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            ids, missiles = self.seed_projectile_registry(
+                override, b"524 XQTAKEN\r\n", b"/* // */ 0xffff XQMISLABEL\r\n523 LAST\r\n"
+            )
+            before = [path.read_bytes() for path in (ids, missiles, song)]
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.upper().count("NO PROJECTILE IDS AVAILABLE FOR XQSONG.SPL"))
+            self.assertEqual(before, [path.read_bytes() for path in (ids, missiles, song)])
+            self.assertFalse(list(override.glob("C0P*.PRO")))
+
     def test_fallback_excludes_one_shot_cast_cue_from_repeat_candidates(self) -> None:
         for cue_opcodes in ((177,), (177, 272)):
             with self.subTest(cue_opcodes=cue_opcodes), disposable_game() as root:
