@@ -278,7 +278,6 @@ DEFINE_PATCH_MACRO c0bw_guard_core_asset BEGIN
         PATCH_IF NOT c0bw_valid BEGIN LPM c0bw_record_damage END
       END
     END
-    3 BEGIN LPM c0bw_guard_projectile END
     4 BEGIN
       LPM c0bw_guard_spl
       PATCH_IF c0bw_valid BEGIN
@@ -303,12 +302,20 @@ END
 // Any competing name or number makes that key ineligible for reuse.
 DEFINE_PATCH_MACRO c0bw_record_ids_entry BEGIN
   TO_UPPER entry_name
+  SPRINT entry_owner ~%entry_name%~
+  PATCH_IF ~%table%~ STRING_EQUAL ~MISSILE~ BEGIN
+    PATCH_MATCH ~%entry_name%~ WITH
+      ~C0 BARDSONG~ BEGIN SPRINT entry_owner ~C0BARDSO~ END
+      ~BARD SONG IGNORE CASTER~ BEGIN SPRINT entry_owner ~C0BDD#SO~ END
+      DEFAULT
+    END
+  END
   PATCH_IF VARIABLE_IS_SET $c0bw_ids_by_number(~%table%~ ~%entry_id%~) BEGIN
-    PATCH_IF $c0bw_ids_by_number(~%table%~ ~%entry_id%~) STRING_COMPARE_CASE ~%entry_name%~ BEGIN
+    PATCH_IF $c0bw_ids_by_number(~%table%~ ~%entry_id%~) STRING_COMPARE_CASE ~%entry_owner%~ BEGIN
       SPRINT $c0bw_ids_by_number(~%table%~ ~%entry_id%~) ~~
     END
   END ELSE BEGIN
-    SPRINT $c0bw_ids_by_number(~%table%~ ~%entry_id%~) ~%entry_name%~
+    SPRINT $c0bw_ids_by_number(~%table%~ ~%entry_id%~) ~%entry_owner%~
   END
   PATCH_IF ~%entry_name%~ STRING_COMPARE ~~ BEGIN
     PATCH_IF VARIABLE_IS_SET $c0bw_ids_by_name(~%table%~ ~%entry_name%~) BEGIN
@@ -444,81 +451,191 @@ END
 // lets a later WeiDU ADD_PROJECTILE continue without filling any gaps.
 DEFINE_ACTION_FUNCTION c0bw_append_projectile
   INT_VAR projectile_base = ~-1~
-  STR_VAR symbol = ""
+  STR_VAR symbol = "" missile_label = ""
   RET projectile_base projectile
 BEGIN
   OUTER_SET projectile_base += 1
   OUTER_SET projectile = projectile_base + 1
   APPEND ~PROJECTL.IDS~ ~%projectile_base% %symbol%~
   ACTION_IF FILE_EXISTS_IN_GAME ~MISSILE.IDS~ BEGIN
-    APPEND ~MISSILE.IDS~ ~%projectile% %symbol%~
+    ACTION_IF ~%missile_label%~ STRING_EQUAL ~~ BEGIN OUTER_SPRINT missile_label ~%symbol%~ END
+    APPEND ~MISSILE.IDS~ ~%projectile% %missile_label%~
   END
   CLEAR_IDS_MAP
 END
 
 DEFINE_ACTION_FUNCTION c0bw_resolve_projectile_binding
-  STR_VAR asset = ""
-  RET ready reused projectile_base projectile projectile_resref
+  INT_VAR index_ready = 0 has_missile = 0
+  STR_VAR asset = "" legacy_label = ""
+  RET reused occupied projectile
 BEGIN
-  ACTION_TO_UPPER asset
-  LAF c0bw_read_projectile_index RET projectile_base index_ready has_missile
-    RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
-  END
+  ACTION_TO_UPPER legacy_label
   OUTER_SET projectl_id = IDS_OF_SYMBOL (~PROJECTL~ ~%asset%~)
   OUTER_SET projectile = projectl_id + 1
-  OUTER_SPRINT projectile_resref ~%asset%~
-  OUTER_SET missile_id = ~-1~
-  ACTION_IF has_missile BEGIN OUTER_SET missile_id = IDS_OF_SYMBOL (~MISSILE~ ~%asset%~) END
-  OUTER_SET occupied = projectl_id >= 0 OR missile_id >= 0
-    OR VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%asset%~)
-    OR VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%asset%~)
+  OUTER_SET occupied = projectl_id >= 0 OR VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%asset%~)
   OUTER_SET reused = 0
   ACTION_IF index_ready AND projectl_id >= 1 AND projectl_id <= 0xFFFE BEGIN
     OUTER_PATCH ~~ BEGIN
       LOOKUP_IDS_SYMBOL_OF_INT projectl_name ~PROJECTL~ projectl_id
       TO_UPPER projectl_name
-      PATCH_IF has_missile BEGIN
-        LOOKUP_IDS_SYMBOL_OF_INT missile_name ~MISSILE~ projectile
-        TO_UPPER missile_name
-      END
     END
     OUTER_SET reused = ~%projectl_name%~ STRING_EQUAL ~%asset%~
       AND VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%asset%~)
       AND $c0bw_ids_by_name(~PROJECTL~ ~%asset%~) = projectl_id
       AND $c0bw_ids_by_number(~PROJECTL~ ~%projectl_id%~) STRING_EQUAL ~%asset%~
-    ACTION_IF reused AND has_missile BEGIN
-      OUTER_SET reused = missile_id = projectile AND ~%missile_name%~ STRING_EQUAL ~%asset%~
-        AND VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%asset%~)
-        AND $c0bw_ids_by_name(~MISSILE~ ~%asset%~) = projectile
-        AND $c0bw_ids_by_number(~MISSILE~ ~%projectile%~) STRING_EQUAL ~%asset%~
+  END
+  ACTION_IF has_missile BEGIN
+    OUTER_SET canonical_id = IDS_OF_SYMBOL (~MISSILE~ ~%asset%~)
+    OUTER_SET legacy_id = IDS_OF_SYMBOL (~MISSILE~ ~%legacy_label%~)
+    OUTER_SET canonical_seen = VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%asset%~)
+    OUTER_SET legacy_seen = VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%legacy_label%~)
+    OUTER_SET occupied = occupied OR canonical_id >= 0 OR legacy_id >= 0 OR canonical_seen OR legacy_seen
+    ACTION_IF reused BEGIN
+      OUTER_PATCH ~~ BEGIN
+        LOOKUP_IDS_SYMBOL_OF_INT missile_name ~MISSILE~ projectile
+        TO_UPPER missile_name
+      END
+      OUTER_SET missile_seen = VARIABLE_IS_SET $c0bw_ids_by_number(~MISSILE~ ~%projectile%~)
+      OUTER_SET reused = (canonical_id < 0 OR canonical_id = projectile)
+        AND (legacy_id < 0 OR legacy_id = projectile)
+        AND (NOT canonical_seen OR $c0bw_ids_by_name(~MISSILE~ ~%asset%~) = projectile)
+        AND (NOT legacy_seen OR $c0bw_ids_by_name(~MISSILE~ ~%legacy_label%~) = projectile)
+        AND ((NOT missile_seen AND ~%missile_name%~ STRING_EQUAL ~%projectile%~)
+          OR (missile_seen AND $c0bw_ids_by_number(~MISSILE~ ~%projectile%~) STRING_EQUAL ~%asset%~
+            AND ((~%missile_name%~ STRING_EQUAL ~%asset%~ AND canonical_id = projectile)
+              OR (~%missile_name%~ STRING_EQUAL ~%legacy_label%~ AND legacy_id = projectile))))
     END
   END
-  OUTER_SET ready = reused
-  ACTION_IF NOT reused BEGIN
-    LAF c0bw_check_projectile_capacity INT_VAR donor_count = 1 projectile_base index_ready has_missile
-      RET ready = ids_ready projectile_base
+END
+
+// Stage the required profiles without materializing any PRO or IDS entry.
+// Keep fresh registrations and validated resources in the same plan.
+DEFINE_ACTION_FUNCTION c0bw_plan_core_projectiles
+  RET profiles_ready core_base core_end
+  RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
+    c0bw_resolved_projectiles c0bw_damaged_resources
+BEGIN
+  ACTION_CLEAR_ARRAY c0bw_core_bindings
+  ACTION_CLEAR_ARRAY c0bw_core_labels
+  ACTION_CLEAR_ARRAY c0bw_core_names
+  ACTION_CLEAR_ARRAY c0bw_resolved_projectiles
+  ACTION_CLEAR_ARRAY c0bw_needs_private
+  ACTION_CLEAR_ARRAY c0bw_shipped_labels
+  LAF c0bw_read_projectile_index RET projectile_base index_ready has_missile
+    RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+  END
+  OUTER_SET profiles_ready = 1
+  OUTER_SET new_count = 0
+  OUTER_SET private_count = 0
+  ACTION_FOR_EACH asset IN C0BARDSO C0BWSPA C0BWSNP C0BWSIW C0BWSIA C0BDD#SO BEGIN
+    ACTION_IF ((~%asset%~ STRING_COMPARE ~C0BWSIW~ AND ~%asset%~ STRING_COMPARE ~C0BWSIA~)
+      OR GAME_IS ~iwdee~)
+      AND (~%asset%~ STRING_COMPARE ~C0BDD#SO~ OR FILE_EXISTS_IN_GAME ~C0BDD#SO.SPL~) BEGIN
+      OUTER_SPRINT legacy_label ~%asset%~
+      OUTER_SPRINT packaged ~%MOD_FOLDER%/bardsong/projectiles/%asset%.PRO~
+      ACTION_IF ~%asset%~ STRING_EQUAL ~C0BARDSO~ BEGIN
+        OUTER_SPRINT legacy_label ~C0 Bardsong~
+        OUTER_SPRINT packaged ~%MOD_FOLDER%/bardsong/c0bardso.PRO~
+      END ELSE ACTION_IF ~%asset%~ STRING_EQUAL ~C0BDD#SO~ BEGIN
+        OUTER_SPRINT legacy_label ~Bard Song Ignore Caster~
+        OUTER_SPRINT packaged ~%MOD_FOLDER%/darkbloom/c0bdd#so.PRO~
+      END
+      OUTER_SET asset_ready = 0
+      ACTION_IF FILE_EXISTS ~%packaged%~ BEGIN
+        COPY - ~%packaged%~ ~.../c0bw-inlined/core-%asset%.pro~
+          LPM c0bw_guard_projectile
+          SET asset_ready = c0bw_valid
+          PATCH_IF asset_ready BEGIN WRITE_LONG 0x0C (THIS BOR 0x40) END
+      END ELSE BEGIN
+        PRINT ~Bardic Wonders #2004: missing packaged %asset%.PRO.~
+      END
+      ACTION_IF NOT asset_ready AND FILE_EXISTS_IN_GAME ~%asset%.PRO~ BEGIN
+        COPY_EXISTING - ~%asset%.PRO~ ~.../c0bw-inlined/core-%asset%.pro~
+          LPM c0bw_guard_projectile
+          SET asset_ready = c0bw_valid
+          PATCH_IF asset_ready BEGIN WRITE_LONG 0x0C (THIS BOR 0x40) END
+      END
+      ACTION_IF asset_ready BEGIN
+        LAF c0bw_resolve_projectile_binding INT_VAR index_ready has_missile STR_VAR asset legacy_label
+          RET reused occupied projectile
+        END
+        ACTION_IF NOT reused BEGIN
+          OUTER_SET projectile = 0
+          OUTER_SET new_count += 1
+          OUTER_SET private_count += occupied
+          OUTER_SET $c0bw_needs_private(~%asset%~) = occupied
+          OUTER_SPRINT $c0bw_shipped_labels(~%asset%~) ~%legacy_label%~
+        END
+        OUTER_SET $c0bw_core_bindings(~%asset%~) = projectile
+      END ELSE ACTION_IF ~%asset%~ STRING_COMPARE ~C0BDD#SO~ BEGIN
+        OUTER_SET profiles_ready = 0
+      END
     END
-    ACTION_IF ready AND occupied BEGIN
-      LAF c0bw_plan_private_projectiles INT_VAR donor_count = 1 has_missile RET_ARRAY c0bw_private_names END
-      OUTER_SPRINT projectile_resref $c0bw_private_names(0)
+  END
+
+  OUTER_SET core_base = projectile_base
+  OUTER_SET core_end = projectile_base
+  ACTION_IF profiles_ready BEGIN
+    LAF c0bw_check_projectile_capacity INT_VAR donor_count = new_count projectile_base index_ready has_missile
+      RET profiles_ready = ids_ready core_base = projectile_base
     END
+    ACTION_IF profiles_ready BEGIN
+      LAF c0bw_plan_private_projectiles INT_VAR donor_count = private_count has_missile RET_ARRAY c0bw_private_names END
+      OUTER_SET core_end = core_base
+      OUTER_SET private_slot = 0
+      // Keep the established controller/stock registration order.
+      ACTION_FOR_EACH asset IN C0BARDSO C0BWSPA C0BWSNP C0BWSIW C0BWSIA C0BDD#SO BEGIN
+        ACTION_IF VARIABLE_IS_SET $c0bw_core_bindings(~%asset%~) BEGIN
+          OUTER_SET projectile = $c0bw_core_bindings(~%asset%~)
+          OUTER_SPRINT resref ~%asset%~
+          ACTION_IF NOT projectile BEGIN
+            OUTER_SET core_end += 1
+            OUTER_SET projectile = core_end + 1
+            OUTER_SPRINT label $c0bw_shipped_labels(~%asset%~)
+            ACTION_IF $c0bw_needs_private(~%asset%~) BEGIN
+              OUTER_SPRINT resref $c0bw_private_names(~%private_slot%~)
+              OUTER_SPRINT label ~%resref%~
+              OUTER_SET private_slot += 1
+            END
+            OUTER_SPRINT $c0bw_core_labels(~%projectile%~) ~%label%~
+            OUTER_SET $c0bw_core_names(~%resref%~) = 1
+            OUTER_SET $c0bw_core_bindings(~%asset%~) = projectile
+          END
+          OUTER_SPRINT $c0bw_resolved_projectiles(~%projectile%~) ~%resref%~
+        END
+      END
+    END ELSE BEGIN
+      PRINT ~Bardic Wonders #2004: no projectile IDs available for the required core projectiles.~
+    END
+  END
+END
+
+// Called once, at the first wrapper that has passed every delivery check.
+DEFINE_ACTION_FUNCTION c0bw_commit_core_projectiles BEGIN
+  ACTION_PHP_EACH c0bw_core_bindings AS asset => projectile BEGIN
+    OUTER_SPRINT resref $c0bw_resolved_projectiles(~%projectile%~)
+    COPY ~.../c0bw-inlined/core-%asset%.pro~ ~override/%resref%.PRO~
+  END
+  OUTER_SET projectile_base = core_base
+  OUTER_WHILE projectile_base < core_end BEGIN
+    OUTER_SET projectile = projectile_base + 2
+    OUTER_SPRINT symbol $c0bw_resolved_projectiles(~%projectile%~)
+    OUTER_SPRINT missile_label $c0bw_core_labels(~%projectile%~)
+    LAF c0bw_append_projectile INT_VAR projectile_base STR_VAR symbol missile_label RET projectile_base END
   END
 END
 
 DEFINE_ACTION_FUNCTION c0bw_resolve_core_asset
   INT_VAR asset_type = 0 required_eff_opcode = ~-1~
   STR_VAR packaged = "" asset = ""
-  RET ready controller_pulse projectile projectile_resref
-  RET_ARRAY c0bw_damaged_resources c0bw_resolved_projectiles
+  RET ready controller_pulse
+  RET_ARRAY c0bw_damaged_resources
 BEGIN
   OUTER_SET ready = 0
-  OUTER_SET projectile = 0
-  OUTER_SPRINT projectile_resref ""
   OUTER_SET controller_fallback = 0
   OUTER_SPRINT controller_pulse ""
   OUTER_SPRINT extension SPL
   ACTION_IF asset_type = 2 BEGIN OUTER_SPRINT extension EFF END
-  ACTION_IF asset_type = 3 BEGIN OUTER_SPRINT extension PRO END
   OUTER_SPRINT filename ~%asset%.%extension%~
   ACTION_IF FILE_EXISTS ~%packaged%~ BEGIN
     COPY ~%packaged%~ ~override~
@@ -536,28 +653,7 @@ BEGIN
       SET ready = c0bw_valid
     BUT_ONLY
   END
-  ACTION_IF ready AND asset_type = 3 BEGIN
-    LAF c0bw_resolve_projectile_binding STR_VAR asset
-      RET ready reused projectile_base projectile projectile_resref
-    END
-    ACTION_IF ready BEGIN
-      ACTION_IF use_package BEGIN
-        COPY ~%packaged%~ ~override/%projectile_resref%.PRO~
-          WRITE_LONG 0x0C (THIS BOR 0x40)
-      END ELSE BEGIN
-        COPY_EXISTING ~%filename%~ ~override/%projectile_resref%.PRO~
-          WRITE_LONG 0x0C (THIS BOR 0x40)
-      END
-      ACTION_IF NOT reused BEGIN
-        LAF c0bw_append_projectile INT_VAR projectile_base STR_VAR symbol = EVAL ~%projectile_resref%~
-          RET projectile
-        END
-      END
-      OUTER_SPRINT $c0bw_resolved_projectiles(~%projectile%~) ~%projectile_resref%~
-    END ELSE BEGIN
-      PRINT ~Bardic Wonders #2004: no projectile IDs available for %filename%.~
-    END
-  END ELSE ACTION_IF ready AND use_package BEGIN
+  ACTION_IF ready AND use_package BEGIN
     COPY ~%packaged%~ ~override/%filename%~
   END
 END
@@ -859,7 +955,7 @@ END
 // Projectile 1 is direct delivery without a PRO. For an external song,
 // validate its donors before making private copies with the save flag.
 DEFINE_PATCH_FUNCTION c0bw_check_song_projectiles
-  INT_VAR require_save_flag = 1
+  INT_VAR require_save_flag = 1 core_pending = 0
   RET projectiles_ready donor_count
   RET_ARRAY c0bw_song_donors c0bw_damaged_resources
 BEGIN
@@ -872,7 +968,10 @@ BEGIN
     READ_SHORT (header + 0x26) projectile
     PATCH_IF projectile != 1 AND NOT (VARIABLE_IS_SET $c0bw_checked_projectiles(~%projectile%~)) BEGIN
       SET projectile_ready = 0
-      PATCH_IF projectile > 1 BEGIN
+      PATCH_IF require_save_flag AND core_pending AND VARIABLE_IS_SET $c0bw_resolved_projectiles(~%projectile%~) BEGIN
+        // The pending profile already passed the PRO guard and has the save flag.
+        SET projectile_ready = 1
+      END ELSE PATCH_IF projectile > 1 BEGIN
         LOOKUP_IDS_SYMBOL_OF_INT projectile_name ~PROJECTL~ (projectile - 1)
         TO_UPPER projectile_name
         SET binding_ready = 1
@@ -946,6 +1045,7 @@ BEGIN
     ACTION_IF NOT FILE_EXISTS_IN_GAME ~%symbol%.PRO~
       AND NOT VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%symbol%~)
       AND NOT VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%symbol%~)
+      AND NOT VARIABLE_IS_SET $c0bw_core_names(~%symbol%~)
       AND IDS_OF_SYMBOL (~PROJECTL~ ~%symbol%~) < 0
       AND (NOT has_missile OR IDS_OF_SYMBOL (~MISSILE~ ~%symbol%~) < 0) BEGIN
       OUTER_SPRINT $c0bw_private_names(~%slot%~) ~%symbol%~
@@ -987,9 +1087,9 @@ END
 // Register known finite songs by resref. The source payload contributes its
 // effects. This component owns every payload projectile and the controller.
 DEFINE_ACTION_FUNCTION c0bw_wrap_song
-  INT_VAR payload_projectile = 1 preserve_projectiles = 0 templates_ready = 0
+  INT_VAR payload_projectile = 1 preserve_projectiles = 0 templates_ready = 0 core_pending = 0
   STR_VAR bardsong_name = "" controller_pulse = ""
-  RET song_name
+  RET song_name core_pending
   RET_ARRAY c0bw_damaged_resources
 BEGIN
   OUTER_SPRINT song_name ""
@@ -1027,7 +1127,7 @@ BEGIN
         END
       END ELSE PATCH_IF payload_projectile >= 1 AND payload_projectile <= 0xFFFF BEGIN
         LPF ALTER_SPELL_HEADER INT_VAR projectile = payload_projectile END
-        LPF c0bw_check_song_projectiles RET payload_ready = projectiles_ready RET_ARRAY c0bw_damaged_resources END
+        LPF c0bw_check_song_projectiles INT_VAR core_pending RET payload_ready = projectiles_ready RET_ARRAY c0bw_damaged_resources END
       END
       LPF c0bw_alter_song_effects
         STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~
@@ -1043,13 +1143,16 @@ BEGIN
       SET controller_pro_ready = 0
       PATCH_IF c0bardso >= 1 AND c0bardso <= 0xFFFF BEGIN
         LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bardso END
-        LPF c0bw_check_song_projectiles RET controller_pro_ready = projectiles_ready RET_ARRAY c0bw_damaged_resources END
+        LPF c0bw_check_song_projectiles INT_VAR core_pending RET controller_pro_ready = projectiles_ready RET_ARRAY c0bw_damaged_resources END
       END
 
     OUTER_SET ids_ready = 1
     ACTION_IF preserve_projectiles AND payload_ready AND donor_count > 0 BEGIN
       LAF c0bw_read_projectile_index RET projectile_base index_ready has_missile
         RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+      END
+      ACTION_IF core_pending AND core_end > projectile_base BEGIN
+        OUTER_SET projectile_base = core_end
       END
       LAF c0bw_check_projectile_capacity INT_VAR donor_count projectile_base index_ready has_missile
         RET ids_ready projectile_base
@@ -1070,6 +1173,10 @@ BEGIN
   END
 
   ACTION_IF ~%song_name%~ STRING_COMPARE ~~ BEGIN
+    ACTION_IF core_pending BEGIN
+      LAF c0bw_commit_core_projectiles END
+      OUTER_SET core_pending = 0
+    END
     COPY_EXISTING ~C0BARDX.SPL~ ~override~
       LPF c0bw_extend_song_effects
         STR_VAR resource = EVAL ~%song_name%~
@@ -1156,15 +1263,16 @@ BEGIN
 END
 
 DEFINE_ACTION_FUNCTION c0bw_wrap_external_songs
+  INT_VAR core_pending = 0
   STR_VAR controller_pulse = ""
-  RET external_wrappers
+  RET external_wrappers core_pending
   RET_ARRAY c0bw_damaged_resources
 BEGIN
   OUTER_SET external_wrappers = 0
   ACTION_PHP_EACH c0bw_eligible_songs AS song => unused BEGIN
-    LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1 templates_ready = 1
+    LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1 templates_ready = 1 core_pending
       STR_VAR controller_pulse bardsong_name = EVAL ~%song%~
-      RET wrapped_song = song_name
+      RET wrapped_song = song_name core_pending
       RET_ARRAY c0bw_damaged_resources
     END
     ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN

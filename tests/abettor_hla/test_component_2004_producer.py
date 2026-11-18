@@ -1251,7 +1251,7 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertEqual(["525 C0BARDSO", "526 C0BWSPA", "527 C0BWSNP", "528 C0P0"],
                              ids.read_text().splitlines()[-4:])
-            self.assertEqual(["526 C0BARDSO", "527 C0BWSPA", "528 C0BWSNP", "529 C0P0"],
+            self.assertEqual(["526 C0 Bardsong", "527 C0BWSPA", "528 C0BWSNP", "529 C0P0"],
                              missile.read_text().splitlines()[-4:])
             self.assertIn("525 Taken label", missile.read_text().splitlines())
 
@@ -1552,6 +1552,77 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertFalse(list(override.glob("C0P*.PRO")))
             for name in ("C0BARDSO.PRO", "C0BWSPA.PRO"):
                 self.assertTrue(resource(override, name).read_bytes()[0x0C] & 0x40)
+
+    def test_legacy_controller_missile_label_reuses_at_capacity(self) -> None:
+        for controller_labels in (b"522 C0 Bardsong\r\n", b"522 C0BARDSO\r\n",
+                                  b"522 C0 Bardsong\r\n522 C0BARDSO\r\n", b""):
+            with self.subTest(labels=controller_labels), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                override = root / "override"
+                ids = resource(override, "PROJECTL.IDS")
+                ids.write_bytes(
+                    b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n"
+                    b"523 C0BWSNP\r\n65534 XQEXHAUSTED\r\n"
+                )
+                missiles = resource(override, "MISSILE.IDS")
+                missiles.write_bytes(
+                    b"IDS V1.0\r\n" + controller_labels
+                    + b"523 C0BWSPA\r\n524 C0BWSNP\r\n65535 XQEXHAUSTED\r\n"
+                )
+                before = ids.read_bytes(), missiles.read_bytes()
+                owned_song = override / "SPCL542A.SPL"
+                owned_song.write_bytes((MOD / "abettor/c0abets2.spl").read_bytes())
+
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                wrapper = parse_spl(owned_song)
+                self.assertEqual(522, wrapper.abilities[0].projectile)
+                pulse = wrapper.find_effects(opcode=272)[0].resource
+                self.assertEqual(523, parse_spl(resource(override, f"{pulse}.SPL")).abilities[0].projectile)
+                self.assertEqual(before, (ids.read_bytes(), missiles.read_bytes()))
+                self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+                self.assertFalse(list(override.glob("C0P*.PRO")))
+
+    def test_core_projectile_batch_capacity_rejects_both_aliases_without_writes(self) -> None:
+        self.assert_core_projectiles_unchanged_for_short_batch(owned_song=True)
+
+    def test_only_external_song_cannot_use_the_core_projectiles_last_slot(self) -> None:
+        self.assert_core_projectiles_unchanged_for_short_batch(owned_song=False)
+
+    def assert_core_projectiles_unchanged_for_short_batch(self, *, owned_song: bool) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            external, _ = self.seed_external_song_and_bard_text(override)
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(
+                b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO\r\n521 XQFOREIGN\r\n522 C0BWSPA\r\n"
+                + (b"522 XQOTHER\r\n" if owned_song else b"")
+                + b"523 C0BWSNP\r\n65533 XQHIGH\r\n"
+            )
+            missiles = resource(override, "MISSILE.IDS")
+            missiles.write_bytes(
+                b"IDS V1.0\r\n522 C0 Bardsong\r\n523 C0BWSPA\r\n524 C0BWSNP\r\n65534 XQHIGH\r\n"
+            )
+            song_paths = [external]
+            if owned_song:
+                stock = override / "SPCL542A.SPL"
+                stock.write_bytes(external.read_bytes())
+                song_paths.append(stock)
+            else:
+                resource(override, "C0ABETS2.SPL").unlink()
+            protected = [ids, missiles, *song_paths]
+            before = [path.read_bytes() for path in protected]
+
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            missing = "THE REQUIRED CORE PROJECTILES" if owned_song else "XQSONG.SPL"
+            self.assertEqual(1, result.stdout.upper().count(f"NO PROJECTILE IDS AVAILABLE FOR {missing}"))
+            self.assertEqual(["ACTIVE", "0"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+            self.assertEqual(before, [path.read_bytes() for path in protected])
+            self.assertFalse(list(override.glob("C0P*.PRO")))
+            for name in ("C0BARDSO.PRO", "C0BWSPA.PRO", "C0BWSNP.PRO"):
+                self.assertFalse((override / name).exists())
 
     def test_fallback_excludes_one_shot_cast_cue_from_repeat_candidates(self) -> None:
         for cue_opcodes in ((177,), (177, 272)):
