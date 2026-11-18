@@ -263,7 +263,7 @@ class Component2004ProducerTests(unittest.TestCase):
             "0 MAGE 0 0 0 0 CLABMA01 0 0 1 0\n",
             encoding="ascii",
         )
-        (override / "PROJECTL.IDS").write_text(f"IDS V1.0\n{existing_projectile} EXISTING\n", encoding="ascii")
+        (override / "PROJECTL.IDS").write_text(f"IDS V1.0\n157 INAREAPA\n{existing_projectile} EXISTING\n", encoding="ascii")
         (override / "MISSILE.IDS").write_text("IDS V1.0\n0 NONE\n", encoding="ascii")
         (override / "ENGINEST.2DA").write_text(
             "2DA V1.0\n0\n STRREF\nSTRREF_FEEDBACK_BATTLESONGBEGIN 0\nSTRREF_FEEDBACK_BATTLESONGEND 0\n",
@@ -478,10 +478,10 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertTrue(resource(override, projectile + ".PRO").read_bytes()[0x0C] & 0x40)
             if bad_donor:
                 for name in ("XQBAD1.SPL", "XQBAD2.SPL"):
-                    wrapped = parse_spl(resource(override, name))
-                    generated = next(e.resource for e in wrapped.abilities[0].effects if e.opcode == 272)
-                    payload = parse_spl(resource(override, generated + ".SPL"))
-                    self.assertEqual(482, payload.abilities[0].projectile)
+                    unchanged = resource(override, name)
+                    self.assertEqual(bytes(song), unchanged.read_bytes())
+                    self.assertEqual(482, parse_spl(unchanged).abilities[0].projectile)
+                    self.assertFalse(parse_spl(unchanged).find_effects(opcode=272))
                 self.assertEqual(1, sum(name.startswith("C0P") for name in ids.values()))
 
     def test_short_and_wrong_signature_spells_are_skipped_once(self) -> None:
@@ -926,6 +926,120 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
             self.assertIn("AP_C0BARDX", resource(override, "CLABBA01.2DA").read_text().split())
             self.assertIn("six rounds", tlk_string(root / "dialog.tlk", int(text.read_text().split()[-1])))
+
+    def assert_rejected_delivery_fallback(self, root: Path, name: str) -> None:
+        override = root / "override"
+        self.seed_bard_clabs(override, "AP_C0BARDX")
+        song, text = self.seed_external_song_and_bard_text(override)
+        original_song, original_text = song.read_bytes(), text.read_bytes()
+        result = self.install(root)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(1, result.stdout.upper().count(f"SKIPPING DAMAGED {name}"))
+        self.assertEqual(original_song, song.read_bytes())
+        self.assertEqual(original_text, text.read_bytes())
+        self.assertFalse(any(path.name.upper().startswith("C0BW00") for path in override.iterdir()))
+        self.assertNotIn("AP_C0BARDX", resource(override, "CLABBA01.2DA").read_text().split())
+        self.assertEqual(["ACTIVE", "0"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+
+    def test_valid_eff_header_with_display_opcode_is_not_a_usable_pulse_fallback(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            packaged = root / "testmod/bardsong/c0bardso.EFF"
+            fallback = bytearray(packaged.read_bytes())
+            struct.pack_into("<I", fallback, 0x10, 139)
+            (root / "override/C0BARDSO.EFF").write_bytes(fallback)
+            packaged.write_bytes(b"EFF V2.0")
+            self.assert_rejected_delivery_fallback(root, "C0BARDSO.EFF")
+
+    def test_installed_controller_pulse_slots_retarget_an_old_payload(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            self.seed_bard_clabs(override)
+            packaged = root / "testmod/bardsong/c0bardso.spl"
+            fallback = packaged.read_bytes().replace(b"BARDSONG", b"PREVPULS")
+            (override / "C0BARDSO.SPL").write_bytes(fallback)
+            packaged.write_bytes(b"SPL V1  ")
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.upper().count("SKIPPING DAMAGED C0BARDSO.SPL"))
+            self.assertEqual(fallback, resource(override, "C0BARDSO.SPL").read_bytes())
+            controller = parse_spl(song)
+            pulse = next(effect.resource for effect in controller.abilities[0].effects if effect.opcode == 272)
+            self.assertNotEqual("PREVPULS", pulse)
+            for ability in controller.abilities:
+                self.assertEqual({pulse, "C0SINGIN"}, {e.resource for e in ability.effects if e.opcode == 177})
+                self.assertEqual({pulse, "C0SINGIN", "C0SINGI2"},
+                                 {e.resource for e in ability.effects if e.opcode == 272})
+                self.assertEqual({pulse}, {e.resource for e in ability.effects if e.opcode == 328})
+            effect = resource(override, f"{pulse}.EFF")
+            self.assertEqual(146, struct.unpack_from("<I", effect.read_bytes(), 0x10)[0])
+            self.assertEqual(pulse, read_eff_resource(effect))
+            payload = parse_spl(resource(override, f"{pulse}.SPL"))
+            ids = {int(index) + 1: name.upper()
+                   for index, name, *_ in (line.split() for line in resource(override, "PROJECTL.IDS").read_text().splitlines())
+                   if index.isdigit()}
+            for ability in payload.abilities:
+                projectile = ids[ability.projectile]
+                self.assertNotEqual("INAREAPA", projectile)
+                self.assertTrue(resource(override, projectile + ".PRO").read_bytes()[0x0C] & 0x40)
+            self.assertIn("AP_C0BARDX", resource(override, "CLABBA01.2DA").read_text().split())
+            self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+
+    def test_spell_without_pulse_delivery_is_not_a_usable_controller_fallback(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            packaged = root / "testmod/bardsong/c0bardso.spl"
+            source = root / "testmod/bardsong/c0bardsx.spl"
+            shutil.copy2(source, root / "override/C0BARDSO.SPL")
+            packaged.write_bytes(b"SPL V1  ")
+            self.assert_rejected_delivery_fallback(root, "C0BARDSO.SPL")
+
+    def test_symphony_uses_installed_cue_and_restores_missing_hla(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            packaged = root / "testmod/bardsong/c0singin.EFF"
+            canonical = packaged.read_bytes()
+            (override / "C0SINGIN.EFF").write_bytes(canonical)
+            packaged.write_bytes(b"EFF V2.0")
+            resource(override, "C0ABETHL.SPL").unlink()
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.upper().count("SKIPPING DAMAGED C0SINGIN.EFF"))
+            self.assertEqual(canonical, resource(override, "C0SINGIN.EFF").read_bytes())
+            finale = resource(override, "C0ABIVS.EFF").read_bytes()
+            self.assertEqual(canonical[:0x30] + b"C0ABIVI\0" + canonical[0x38:], finale)
+            self.assertTrue(parse_spl(resource(override, "C0ABIVI.SPL")).find_effects(opcode=20))
+            controller = parse_spl(resource(override, "C0ABETS2.SPL"))
+            self.assertTrue(controller.find_effects(opcode=177, resource="C0ABIVS"))
+            pulse = next(e.resource for e in controller.abilities[0].effects if e.opcode == 272)
+            hla = parse_spl(resource(override, "C0ABETHL.SPL"))
+            self.assertEqual(1, len(hla.find_effects(opcode=326, resource="C0BARDX")))
+            self.assertEqual(1, len(hla.find_effects(opcode=309, resource=pulse)))
+            rows = resource(override, "LUC0ABET.2DA").read_text().splitlines()
+            self.assertEqual(1, sum("AP_C0ABETHL" in row.split() for row in rows))
+
+    def test_symphony_scrubs_dangling_hla_if_both_sources_are_missing(self) -> None:
+        for runtime_available in (True, False):
+            with self.subTest(runtime_available=runtime_available), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                override = root / "override"
+                table = resource(override, "LUC0ABET.2DA")
+                with table.open("a", encoding="ascii") as stream:
+                    stream.write("C0ABET2 AP_C0ABETHL * * 1 99 1 AP_C0ABETT5 *\n")
+                resource(override, "C0ABETHL.SPL").unlink()
+                (root / "testmod/abettor/c0abethl.spl").unlink()
+                if not runtime_available:
+                    (root / "testmod/bardsong/c0bardx.spl").write_bytes(b"SPL V1  ")
+                self.assertIn("AP_C0ABETHL", table.read_text().split())
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertNotIn("AP_C0ABETHL", table.read_text().split())
+                self.assertIn("AP_C0ABETT5", table.read_text().split())
+                self.assertFalse(any(path.name.upper() in {"C0ABETHL.SPL", "C0ABIVS.EFF", "C0ABIVI.SPL"}
+                                     for path in override.iterdir()))
 
     def test_projectile_donor_requires_all_type_specific_blocks(self) -> None:
         source = (MOD / "bardsong/c0bardso.PRO").read_bytes()

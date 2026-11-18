@@ -5,7 +5,7 @@ LAF c0bw_resolve_core_asset INT_VAR asset_type = 1
   STR_VAR asset = ~C0BARDX~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardx.spl~
   RET loader_ready = ready RET_ARRAY c0bw_damaged_resources
 END
-LAF c0bw_resolve_wrapper_templates RET templates_ready RET_ARRAY c0bw_damaged_resources END
+LAF c0bw_resolve_wrapper_templates RET templates_ready templates_rejected RET_ARRAY c0bw_damaged_resources END
 LAF c0bw_resolve_core_asset INT_VAR asset_type = 3
   STR_VAR asset = ~C0BARDSO~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardso.PRO~ missile_name = ~C0 Bardsong~
   RET controller_projectile_ready = ready RET_ARRAY c0bw_damaged_resources
@@ -53,15 +53,15 @@ COPY ~%MOD_FOLDER%/bardsong/c0brdef1.bam~ OVERRIDE
 COPY ~%MOD_FOLDER%/bardsong/c0brdef1.vvc~ OVERRIDE
 COPY ~%MOD_FOLDER%/bardsong/c0bardso.wav~ OVERRIDE
 // C0SINGI2 suppresses stock delivery while the wrapper is active.
-LAF c0bw_resolve_core_asset INT_VAR asset_type = 2
+LAF c0bw_resolve_core_asset INT_VAR asset_type = 2 required_eff_opcode = 326
   STR_VAR asset = ~C0SINGI2~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0singi2.EFF~
   RET suppression_ready = ready RET_ARRAY c0bw_damaged_resources
 END
 OUTER_SET support_ready = support_ready AND suppression_ready
 // C0SINGIN's effect provides presentation and the optional Symphony finale.
-LAF c0bw_resolve_core_asset INT_VAR asset_type = 2
+LAF c0bw_resolve_core_asset INT_VAR asset_type = 2 required_eff_opcode = 326
   STR_VAR asset = ~C0SINGIN~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0singin.EFF~
-  RET_ARRAY c0bw_damaged_resources
+  RET singing_eff_ready = ready RET_ARRAY c0bw_damaged_resources
 END
 LAF c0bw_resolve_core_asset
   STR_VAR asset = ~C0SINGI2~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0singi2.spl~
@@ -172,6 +172,7 @@ OUTER_SET $c0bw_owned_songs(C0ABETS2) = 1
 LAF c0bw_find_external_songs RET_ARRAY c0bw_eligible_songs c0bw_damaged_resources END
 
 OUTER_SET finite_ready = 0
+OUTER_SPRINT symphony_payload ""
 ACTION_IF loader_ready AND templates_ready
   AND controller_projectile_ready AND profiles_ready AND support_ready BEGIN
   OUTER_SET installed_wrappers = 0
@@ -192,10 +193,10 @@ ACTION_IF loader_ready AND templates_ready
   ACTION_IF ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
     OUTER_SET installed_wrappers += 1
   END
-  INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
   LAF c0bw_wrap_external_songs RET external_wrappers RET_ARRAY c0bw_damaged_resources END
   OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
 END
+INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
 
 ACTION_CLEAR_ARRAY c0bw_bard_clabs
 ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_bard_clabs BEGIN CLABBA01 => 1 END
@@ -248,7 +249,7 @@ INCLUDE ~%MOD_FOLDER%/lib/bardsong_description.tpa~
        FINITE
 ACTIVE %finite_ready%
 >>>>>>>>
-ACTION_IF finite_ready OR FILE_EXISTS_IN_GAME ~C0BWSYS.2DA~ BEGIN
+ACTION_IF finite_ready OR templates_rejected OR FILE_EXISTS_IN_GAME ~C0BWSYS.2DA~ BEGIN
   COPY ~.../inlined/c0bw-song-state.2da~ ~override/C0BWSYS.2DA~
     EVALUATE_BUFFER
 END

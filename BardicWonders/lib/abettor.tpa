@@ -193,6 +193,8 @@ SAY UNIDENTIFIED_DESC ~Embrace the Shadow
 Gaining the favor of the Lord of Shadows has its advantages. The Abettor of Mask permanently gains a +1 bonus to Dexterity and Luck and becomes immune to poison and backstabs. <PRO_HISHER> backstab multiplier is also increased by one point.~
 
 INCLUDE ~%MOD_FOLDER%/lib/abettor_symphony.tpa~
+COPY ~%MOD_FOLDER%/abettor/c0abethl.spl~ ~override~
+  LPM c0bw_describe_symphony
 
 
 INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~

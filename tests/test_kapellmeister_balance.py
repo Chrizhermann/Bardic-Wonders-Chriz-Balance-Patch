@@ -51,7 +51,7 @@ class KapellmeisterBalanceTests(unittest.TestCase):
         previous[-1] ^= 0x5A
         (self.override / "C0KM#SOH.SPL").write_bytes(previous)
         (self.override / "UNRELATED.TXT").write_bytes(b"Keep this resource.\x00\xff")
-        (self.override / "PROJECTL.IDS").write_text("IDS V1.0\n155 INAREAPA\n")
+        (self.override / "PROJECTL.IDS").write_text("IDS V1.0\n155 INAREAPA\n156 C0BWSPA\n")
         (self.override / "MISSILE.IDS").write_text("IDS V1.0\n0 NONE\n")
         self.before = file_snapshot(self.override)
         source = (MOD / "lib" / "kapellmeister.tpa").read_text(encoding="utf-8")
