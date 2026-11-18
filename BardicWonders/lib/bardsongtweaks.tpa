@@ -1,5 +1,6 @@
 INCLUDE ~%MOD_FOLDER%/lib/bardsong_registration.tpa~
 ACTION_CLEAR_ARRAY c0bw_damaged_resources
+ACTION_CLEAR_ARRAY c0bw_resolved_projectiles
 
 LAF c0bw_resolve_core_asset INT_VAR asset_type = 1
   STR_VAR asset = ~C0BARDX~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardx.spl~
@@ -7,29 +8,33 @@ LAF c0bw_resolve_core_asset INT_VAR asset_type = 1
 END
 LAF c0bw_resolve_wrapper_templates RET templates_ready templates_rejected controller_pulse RET_ARRAY c0bw_damaged_resources END
 LAF c0bw_resolve_core_asset INT_VAR asset_type = 3
-  STR_VAR asset = ~C0BARDSO~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardso.PRO~ missile_name = ~C0 Bardsong~
-  RET controller_projectile_ready = ready RET_ARRAY c0bw_damaged_resources
+  STR_VAR asset = ~C0BARDSO~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardso.PRO~
+  RET controller_projectile_ready = ready c0bardso = projectile
+  RET_ARRAY c0bw_damaged_resources c0bw_resolved_projectiles
 END
-OUTER_SET c0bardso = IDS_OF_SYMBOL (~PROJECTL~ ~C0BARDSO~) + 1
 
 OUTER_SET profiles_ready = 1
 ACTION_FOR_EACH profile IN C0BWSPA C0BWSNP BEGIN
   LAF c0bw_resolve_core_asset INT_VAR asset_type = 3
     STR_VAR asset = EVAL ~%profile%~ packaged = EVAL ~%MOD_FOLDER%/bardsong/projectiles/%profile%.PRO~
-    RET profile_ready = ready RET_ARRAY c0bw_damaged_resources
+    RET profile_ready = ready profile_projectile = projectile
+    RET_ARRAY c0bw_damaged_resources c0bw_resolved_projectiles
   END
   OUTER_SET profiles_ready = profiles_ready AND profile_ready
+  ACTION_IF ~%profile%~ STRING_EQUAL ~C0BWSPA~ BEGIN
+    OUTER_SET song_party_projectile = profile_projectile
+  END ELSE BEGIN
+    OUTER_SET song_narrow_enemy_projectile = profile_projectile
+  END
 END
-OUTER_SET song_party_projectile = IDS_OF_SYMBOL (~PROJECTL~ ~C0BWSPA~) + 1
-OUTER_SET song_narrow_enemy_projectile = IDS_OF_SYMBOL (~PROJECTL~ ~C0BWSNP~) + 1
 OUTER_SET song_enemy_projectile = song_narrow_enemy_projectile
 ACTION_IF GAME_IS ~iwdee~ BEGIN
   LAF c0bw_resolve_core_asset INT_VAR asset_type = 3
     STR_VAR asset = ~C0BWSIW~ packaged = EVAL ~%MOD_FOLDER%/bardsong/projectiles/C0BWSIW.PRO~
-    RET profile_ready = ready RET_ARRAY c0bw_damaged_resources
+    RET profile_ready = ready song_enemy_projectile = projectile
+    RET_ARRAY c0bw_damaged_resources c0bw_resolved_projectiles
   END
   OUTER_SET profiles_ready = profiles_ready AND profile_ready
-  OUTER_SET song_enemy_projectile = IDS_OF_SYMBOL (~PROJECTL~ ~C0BWSIW~) + 1
 END
 
 ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_song_messages BEGIN
@@ -91,9 +96,9 @@ ACTION_IF GAME_IS ~iwdee~ AND profiles_ready BEGIN
   OUTER_SET stock_bard_projectile = song_party_projectile
   LAF c0bw_resolve_core_asset INT_VAR asset_type = 3
     STR_VAR asset = ~C0BWSIA~ packaged = EVAL ~%MOD_FOLDER%/bardsong/projectiles/C0BWSIA.PRO~
-    RET iwd_party_ready = ready RET_ARRAY c0bw_damaged_resources
+    RET iwd_party_ready = ready iwd_party_projectile = projectile
+    RET_ARRAY c0bw_damaged_resources c0bw_resolved_projectiles
   END
-  OUTER_SET iwd_party_projectile = IDS_OF_SYMBOL (~PROJECTL~ ~C0BWSIA~) + 1
   ACTION_FOR_EACH song IN SPCL115 SPCL116 SPCL117 SPCL119 SPCL120 SPCL542A BEGIN
     COPY_EXISTING ~%song%.SPL~ ~override~
       LPM c0bw_guard_spl
@@ -156,11 +161,10 @@ ACTION_IF FILE_EXISTS_IN_GAME ~C0BDD#SO.SPL~ BEGIN
   OUTER_SET $c0bw_owned_songs(C0BDD#SO) = 1
   LAF c0bw_resolve_core_asset INT_VAR asset_type = 3
     STR_VAR asset = ~C0BDD#SO~ packaged = EVAL ~%MOD_FOLDER%/darkbloom/c0bdd#so.PRO~
-      missile_name = ~Bard Song Ignore Caster~
-    RET darkbloom_ready = ready RET_ARRAY c0bw_damaged_resources
+    RET darkbloom_ready = ready darkbloom_projectile = projectile
+    RET_ARRAY c0bw_damaged_resources c0bw_resolved_projectiles
   END
   ACTION_IF darkbloom_ready BEGIN
-    OUTER_SET darkbloom_projectile = IDS_OF_SYMBOL (~PROJECTL~ ~C0BDD#SO~) + 1
     ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN C0BDD#SO => darkbloom_projectile END
   END
 END

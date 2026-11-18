@@ -299,21 +299,45 @@ DEFINE_PATCH_MACRO c0bw_guard_core_asset BEGIN
   END
 END
 
+// Record both directions. Repeated identical entries retain their binding.
+// Any competing name or number makes that key ineligible for reuse.
+DEFINE_PATCH_MACRO c0bw_record_ids_entry BEGIN
+  TO_UPPER entry_name
+  PATCH_IF VARIABLE_IS_SET $c0bw_ids_by_number(~%table%~ ~%entry_id%~) BEGIN
+    PATCH_IF $c0bw_ids_by_number(~%table%~ ~%entry_id%~) STRING_COMPARE_CASE ~%entry_name%~ BEGIN
+      SPRINT $c0bw_ids_by_number(~%table%~ ~%entry_id%~) ~~
+    END
+  END ELSE BEGIN
+    SPRINT $c0bw_ids_by_number(~%table%~ ~%entry_id%~) ~%entry_name%~
+  END
+  PATCH_IF ~%entry_name%~ STRING_COMPARE ~~ BEGIN
+    PATCH_IF VARIABLE_IS_SET $c0bw_ids_by_name(~%table%~ ~%entry_name%~) BEGIN
+      PATCH_IF $c0bw_ids_by_name(~%table%~ ~%entry_name%~) != entry_id BEGIN
+        SET $c0bw_ids_by_name(~%table%~ ~%entry_name%~) = ~-1~
+      END
+    END ELSE BEGIN
+      SET $c0bw_ids_by_name(~%table%~ ~%entry_name%~) = entry_id
+    END
+  END
+END
+
 // Scan the IDS token stream. WeiDU's lexer takes the longest match,
 // so a symbol can absorb spaces, digits and "//" after its first letter.
 // A slash starts a comment only when the lexer reaches it as a token.
 DEFINE_PATCH_FUNCTION c0bw_scan_projectile_ids
-  INT_VAR missile_labels = 0
+  STR_VAR table = "PROJECTL"
   RET max_id ids_complete
+  RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
 BEGIN
   SET max_id = ~-1~
   SET ids_complete = 1
   SET cursor = 0
-  SET first_id = ~-1~
-  SET preamble = 1
+  SET entry_id = ~-1~
+  SPRINT entry_name ""
+  SET first_entry = 1
   SPRINT name_start ~A-Za-z_#~
   SPRINT name_body ~A-Za-z_0-9#.! /'-~
-  PATCH_IF missile_labels BEGIN
+  PATCH_IF ~%table%~ STRING_EQUAL ~MISSILE~ BEGIN
     // WeiDU 249 uses idslexer2 for BG2's MISSILE labels.
     SPRINT name_start ~A-Za-z_#(*~
     SPRINT name_body ~A-Za-z_0-9#.! /',()?+-~
@@ -343,11 +367,14 @@ BEGIN
       SET number_at = INDEX_BUFFER (~-?[0-9]~ cursor)
       PATCH_IF name_at = cursor BEGIN
         SET name_end = INDEX_BUFFER (CASE_SENSITIVE ~[^%name_body%]~ cursor)
-        SET cursor = name_end < 0 ? BUFFER_LENGTH : name_end
-        PATCH_IF preamble AND first_id >= 0 BEGIN
-          SET max_id = first_id
-          SET preamble = 0
+        SET token_end = name_end < 0 ? BUFFER_LENGTH : name_end
+        PATCH_IF entry_id >= 0 BEGIN
+          SET trimmed_end = token_end
+          WHILE BYTE_AT (trimmed_end - 1) = 0x20 BEGIN SET trimmed_end -= 1 END
+          READ_ASCII cursor token (trimmed_end - cursor)
+          SPRINT entry_name ~%entry_name%%token%~
         END
+        SET cursor = token_end
       END ELSE PATCH_IF number_at = cursor BEGIN
         SET digit_start = cursor + (ch = 0x2D)
         SET number_end = INDEX_BUFFER (~[^0-9]~ digit_start)
@@ -359,25 +386,37 @@ BEGIN
         READ_ASCII cursor id (number_end - cursor)
         SET cursor = number_end
         PATCH_IF IS_AN_INT id BEGIN
-          PATCH_IF preamble AND first_id < 0 BEGIN
-            // Defer a leading standalone entry count. After the first row,
-            // numeric-only entries reserve their IDs even without a name.
-            SET first_id = id
-          END ELSE BEGIN
-            SET preamble = 0
-            PATCH_IF id > max_id BEGIN SET max_id = id END
+          PATCH_IF entry_id >= 0 BEGIN
+            LPM c0bw_record_ids_entry
+            // A first nameless number may be a header count. Native lookup
+            // still checks any such reservation against a candidate pair.
+            PATCH_IF entry_id > max_id AND (NOT first_entry OR ~%entry_name%~ STRING_COMPARE ~~) BEGIN
+              SET max_id = entry_id
+            END
+            SET first_entry = 0
           END
+          SET entry_id = id
+          SPRINT entry_name ""
         END
       END ELSE BEGIN
         SET cursor += 1
       END
     END
   END
+  PATCH_IF entry_id >= 0 BEGIN
+    LPM c0bw_record_ids_entry
+    PATCH_IF entry_id > max_id AND (NOT first_entry OR ~%entry_name%~ STRING_COMPARE ~~) BEGIN
+      SET max_id = entry_id
+    END
+  END
 END
 
 DEFINE_ACTION_FUNCTION c0bw_read_projectile_index
   RET projectile_base index_ready has_missile
+  RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
 BEGIN
+  ACTION_CLEAR_ARRAY c0bw_ids_by_name
+  ACTION_CLEAR_ARRAY c0bw_ids_by_number
   OUTER_SET max_projectile = ~-1~
   OUTER_SET max_missile = ~-1~
   OUTER_SET projectl_complete = 0
@@ -385,42 +424,96 @@ BEGIN
   OUTER_SET has_missile = FILE_EXISTS_IN_GAME ~MISSILE.IDS~
   ACTION_IF FILE_EXISTS_IN_GAME ~PROJECTL.IDS~ BEGIN
     COPY_EXISTING - ~PROJECTL.IDS~ ~.../c0bw-inlined/projectl-index.ids~
-      LPF c0bw_scan_projectile_ids RET max_projectile = max_id projectl_complete = ids_complete END
+      LPF c0bw_scan_projectile_ids RET max_projectile = max_id projectl_complete = ids_complete
+        RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+      END
   END
   ACTION_IF has_missile BEGIN
     COPY_EXISTING - ~MISSILE.IDS~ ~.../c0bw-inlined/missile-index.ids~
-      LPF c0bw_scan_projectile_ids INT_VAR missile_labels = 1
+      LPF c0bw_scan_projectile_ids STR_VAR table = ~MISSILE~
         RET max_missile = max_id missile_complete = ids_complete
+        RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
       END
   END
   OUTER_SET index_ready = projectl_complete AND missile_complete AND max_projectile >= 0
   OUTER_SET projectile_base = max_projectile >= max_missile - 1 ? max_projectile : max_missile - 1
+  CLEAR_IDS_MAP
 END
 
 // The caller checked capacity for the aligned pair. An aligned tail also
 // lets a later WeiDU ADD_PROJECTILE continue without filling any gaps.
 DEFINE_ACTION_FUNCTION c0bw_append_projectile
   INT_VAR projectile_base = ~-1~
-  STR_VAR symbol = "" missile_name = ""
+  STR_VAR symbol = ""
   RET projectile_base projectile
 BEGIN
   OUTER_SET projectile_base += 1
   OUTER_SET projectile = projectile_base + 1
   APPEND ~PROJECTL.IDS~ ~%projectile_base% %symbol%~
   ACTION_IF FILE_EXISTS_IN_GAME ~MISSILE.IDS~ BEGIN
-    ACTION_IF ~%missile_name%~ STRING_EQUAL ~~ BEGIN OUTER_SPRINT missile_name ~%symbol%~ END
-    APPEND ~MISSILE.IDS~ ~%projectile% %missile_name%~
+    APPEND ~MISSILE.IDS~ ~%projectile% %symbol%~
   END
   CLEAR_IDS_MAP
 END
 
+DEFINE_ACTION_FUNCTION c0bw_resolve_projectile_binding
+  STR_VAR asset = ""
+  RET ready reused projectile_base projectile projectile_resref
+BEGIN
+  ACTION_TO_UPPER asset
+  LAF c0bw_read_projectile_index RET projectile_base index_ready has_missile
+    RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+  END
+  OUTER_SET projectl_id = IDS_OF_SYMBOL (~PROJECTL~ ~%asset%~)
+  OUTER_SET projectile = projectl_id + 1
+  OUTER_SPRINT projectile_resref ~%asset%~
+  OUTER_SET missile_id = ~-1~
+  ACTION_IF has_missile BEGIN OUTER_SET missile_id = IDS_OF_SYMBOL (~MISSILE~ ~%asset%~) END
+  OUTER_SET occupied = projectl_id >= 0 OR missile_id >= 0
+    OR VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%asset%~)
+    OR VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%asset%~)
+  OUTER_SET reused = 0
+  ACTION_IF index_ready AND projectl_id >= 1 AND projectl_id <= 0xFFFE BEGIN
+    OUTER_PATCH ~~ BEGIN
+      LOOKUP_IDS_SYMBOL_OF_INT projectl_name ~PROJECTL~ projectl_id
+      TO_UPPER projectl_name
+      PATCH_IF has_missile BEGIN
+        LOOKUP_IDS_SYMBOL_OF_INT missile_name ~MISSILE~ projectile
+        TO_UPPER missile_name
+      END
+    END
+    OUTER_SET reused = ~%projectl_name%~ STRING_EQUAL ~%asset%~
+      AND VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%asset%~)
+      AND $c0bw_ids_by_name(~PROJECTL~ ~%asset%~) = projectl_id
+      AND $c0bw_ids_by_number(~PROJECTL~ ~%projectl_id%~) STRING_EQUAL ~%asset%~
+    ACTION_IF reused AND has_missile BEGIN
+      OUTER_SET reused = missile_id = projectile AND ~%missile_name%~ STRING_EQUAL ~%asset%~
+        AND VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%asset%~)
+        AND $c0bw_ids_by_name(~MISSILE~ ~%asset%~) = projectile
+        AND $c0bw_ids_by_number(~MISSILE~ ~%projectile%~) STRING_EQUAL ~%asset%~
+    END
+  END
+  OUTER_SET ready = reused
+  ACTION_IF NOT reused BEGIN
+    LAF c0bw_check_projectile_capacity INT_VAR donor_count = 1 projectile_base index_ready has_missile
+      RET ready = ids_ready projectile_base
+    END
+    ACTION_IF ready AND occupied BEGIN
+      LAF c0bw_plan_private_projectiles INT_VAR donor_count = 1 has_missile RET_ARRAY c0bw_private_names END
+      OUTER_SPRINT projectile_resref $c0bw_private_names(0)
+    END
+  END
+END
+
 DEFINE_ACTION_FUNCTION c0bw_resolve_core_asset
   INT_VAR asset_type = 0 required_eff_opcode = ~-1~
-  STR_VAR packaged = "" asset = "" missile_name = ""
-  RET ready controller_pulse
-  RET_ARRAY c0bw_damaged_resources
+  STR_VAR packaged = "" asset = ""
+  RET ready controller_pulse projectile projectile_resref
+  RET_ARRAY c0bw_damaged_resources c0bw_resolved_projectiles
 BEGIN
   OUTER_SET ready = 0
+  OUTER_SET projectile = 0
+  OUTER_SPRINT projectile_resref ""
   OUTER_SET controller_fallback = 0
   OUTER_SPRINT controller_pulse ""
   OUTER_SPRINT extension SPL
@@ -444,32 +537,28 @@ BEGIN
     BUT_ONLY
   END
   ACTION_IF ready AND asset_type = 3 BEGIN
-    CLEAR_IDS_MAP
-    OUTER_SET existing_id = IDS_OF_SYMBOL (~PROJECTL~ ~%asset%~)
-    OUTER_SET already_registered = existing_id >= 0
-    ACTION_IF already_registered BEGIN
-      OUTER_SET ready = existing_id >= 1 AND existing_id <= 0xFFFE
-    END ELSE BEGIN
-      LAF c0bw_check_projectile_capacity INT_VAR donor_count = 1 RET ready = ids_ready projectile_base END
+    LAF c0bw_resolve_projectile_binding STR_VAR asset
+      RET ready reused projectile_base projectile projectile_resref
     END
-    ACTION_IF NOT ready BEGIN
+    ACTION_IF ready BEGIN
+      ACTION_IF use_package BEGIN
+        COPY ~%packaged%~ ~override/%projectile_resref%.PRO~
+          WRITE_LONG 0x0C (THIS BOR 0x40)
+      END ELSE BEGIN
+        COPY_EXISTING ~%filename%~ ~override/%projectile_resref%.PRO~
+          WRITE_LONG 0x0C (THIS BOR 0x40)
+      END
+      ACTION_IF NOT reused BEGIN
+        LAF c0bw_append_projectile INT_VAR projectile_base STR_VAR symbol = EVAL ~%projectile_resref%~
+          RET projectile
+        END
+      END
+      OUTER_SPRINT $c0bw_resolved_projectiles(~%projectile%~) ~%projectile_resref%~
+    END ELSE BEGIN
       PRINT ~Bardic Wonders #2004: no projectile IDs available for %filename%.~
     END
-  END
-  ACTION_IF ready AND use_package BEGIN
+  END ELSE ACTION_IF ready AND use_package BEGIN
     COPY ~%packaged%~ ~override/%filename%~
-  END
-  ACTION_IF ready AND asset_type = 3 BEGIN
-    // Preserve a registered number even when replacing its PRO bytes.
-    ACTION_IF NOT FILE_EXISTS ~override/%filename%~ BEGIN
-      COPY_EXISTING ~%filename%~ ~override/%filename%~
-    END
-    COPY_EXISTING ~%filename%~ ~override~
-      WRITE_LONG 0x0C (THIS BOR 0x40)
-    BUT_ONLY
-    ACTION_IF NOT already_registered BEGIN
-      LAF c0bw_append_projectile INT_VAR projectile_base STR_VAR symbol = EVAL ~%asset%~ missile_name END
-    END
   END
 END
 
@@ -785,7 +874,12 @@ BEGIN
       SET projectile_ready = 0
       PATCH_IF projectile > 1 BEGIN
         LOOKUP_IDS_SYMBOL_OF_INT projectile_name ~PROJECTL~ (projectile - 1)
-        PATCH_IF FILE_EXISTS_IN_GAME ~%projectile_name%.PRO~ BEGIN
+        TO_UPPER projectile_name
+        SET binding_ready = 1
+        PATCH_IF require_save_flag AND VARIABLE_IS_SET $c0bw_resolved_projectiles(~%projectile%~) BEGIN
+          SET binding_ready = $c0bw_resolved_projectiles(~%projectile%~) STRING_EQUAL ~%projectile_name%~
+        END
+        PATCH_IF binding_ready AND FILE_EXISTS_IN_GAME ~%projectile_name%.PRO~ BEGIN
           INNER_ACTION BEGIN
             COPY_EXISTING ~%projectile_name%.PRO~ ~override~
               LPM c0bw_guard_projectile
@@ -807,38 +901,55 @@ BEGIN
 END
 
 DEFINE_ACTION_FUNCTION c0bw_check_projectile_capacity
-  INT_VAR donor_count = 0
+  INT_VAR donor_count = 0 projectile_base = ~-1~ index_ready = 0 has_missile = 0
   RET ids_ready projectile_base
 BEGIN
-  OUTER_SET ids_ready = 1
-  OUTER_SET projectile_base = ~-1~
-  ACTION_IF donor_count > 0 BEGIN
-    LAF c0bw_read_projectile_index RET projectile_base index_ready has_missile END
-    OUTER_SET ids_ready = 0
-    ACTION_IF index_ready AND projectile_base <= 0xFFFE - donor_count BEGIN
-      CLEAR_IDS_MAP
-      OUTER_SET candidate = projectile_base + 1
-      OUTER_SET free_pairs = 0
-      OUTER_WHILE free_pairs < donor_count AND candidate <= 0xFFFE - (donor_count - free_pairs) + 1 BEGIN
-        OUTER_SET missile_id = candidate + 1
-        OUTER_SPRINT missile_label ~%missile_id%~
-        OUTER_PATCH ~~ BEGIN
-          LOOKUP_IDS_SYMBOL_OF_INT projectile_label ~PROJECTL~ candidate
-          PATCH_IF has_missile BEGIN
-            LOOKUP_IDS_SYMBOL_OF_INT missile_label ~MISSILE~ missile_id
-          END
+  OUTER_SET ids_ready = donor_count = 0
+  ACTION_IF donor_count > 0 AND index_ready AND projectile_base <= 0xFFFE - donor_count BEGIN
+    OUTER_SET candidate = projectile_base + 1
+    OUTER_SET free_pairs = 0
+    OUTER_WHILE free_pairs < donor_count AND candidate <= 0xFFFE - (donor_count - free_pairs) + 1 BEGIN
+      OUTER_SET missile_id = candidate + 1
+      OUTER_SPRINT missile_label ~%missile_id%~
+      OUTER_PATCH ~~ BEGIN
+        LOOKUP_IDS_SYMBOL_OF_INT projectile_label ~PROJECTL~ candidate
+        PATCH_IF has_missile BEGIN
+          LOOKUP_IDS_SYMBOL_OF_INT missile_label ~MISSILE~ missile_id
         END
-        // An unoccupied number is returned as its decimal spelling.
-        ACTION_IF ~%projectile_label%~ STRING_EQUAL ~%candidate%~
-          AND ~%missile_label%~ STRING_EQUAL ~%missile_id%~ BEGIN
-          OUTER_SET free_pairs += 1
-        END ELSE BEGIN
-          OUTER_SET projectile_base = candidate
-          OUTER_SET free_pairs = 0
-        END
-        OUTER_SET candidate += 1
       END
-      OUTER_SET ids_ready = free_pairs = donor_count
+      // An unoccupied number is returned as its decimal spelling.
+      ACTION_IF ~%projectile_label%~ STRING_EQUAL ~%candidate%~
+        AND ~%missile_label%~ STRING_EQUAL ~%missile_id%~ BEGIN
+        OUTER_SET free_pairs += 1
+      END ELSE BEGIN
+        OUTER_SET projectile_base = candidate
+        OUTER_SET free_pairs = 0
+      END
+      OUTER_SET candidate += 1
+    END
+    OUTER_SET ids_ready = free_pairs = donor_count
+  END
+END
+
+// The ascending serial also keeps the names distinct within this batch.
+// Check both parsed tables in addition to WeiDU's authoritative lookups.
+DEFINE_ACTION_FUNCTION c0bw_plan_private_projectiles
+  INT_VAR donor_count = 0 has_missile = 0
+  RET_ARRAY c0bw_private_names
+BEGIN
+  ACTION_CLEAR_ARRAY c0bw_private_names
+  OUTER_SET serial = 0
+  OUTER_SET slot = 0
+  OUTER_WHILE slot < donor_count BEGIN
+    OUTER_SPRINT symbol ~C0P%serial%~
+    OUTER_SET serial += 1
+    ACTION_IF NOT FILE_EXISTS_IN_GAME ~%symbol%.PRO~
+      AND NOT VARIABLE_IS_SET $c0bw_ids_by_name(~PROJECTL~ ~%symbol%~)
+      AND NOT VARIABLE_IS_SET $c0bw_ids_by_name(~MISSILE~ ~%symbol%~)
+      AND IDS_OF_SYMBOL (~PROJECTL~ ~%symbol%~) < 0
+      AND (NOT has_missile OR IDS_OF_SYMBOL (~MISSILE~ ~%symbol%~) < 0) BEGIN
+      OUTER_SPRINT $c0bw_private_names(~%slot%~) ~%symbol%~
+      OUTER_SET slot += 1
     END
   END
 END
@@ -849,6 +960,7 @@ DEFINE_PATCH_FUNCTION c0bw_register_external_projectiles
   INT_VAR projectile_base = ~-1~
 BEGIN
   PATCH_CLEAR_ARRAY c0bw_external_projectiles
+  SET slot = 0
   GET_OFFSET_ARRAY song_headers SPL_V10_HEADERS
   PHP_EACH song_headers AS header_index => header BEGIN
     READ_SHORT (header + 0x26) original_id
@@ -856,13 +968,8 @@ BEGIN
       PATCH_IF NOT (VARIABLE_IS_SET $c0bw_external_projectiles(~%original_id%~)) BEGIN
         SPRINT original_projectile $c0bw_song_donors(~%original_id%~)
         INNER_ACTION BEGIN
-          OUTER_SPRINT private_projectile ~C0P%c0bw_projectile_serial%~
-          OUTER_WHILE FILE_EXISTS_IN_GAME ~%private_projectile%.PRO~
-            OR (IDS_OF_SYMBOL (~PROJECTL~ ~%private_projectile%~) >= 0) BEGIN
-            OUTER_SET c0bw_projectile_serial += 1
-            OUTER_SPRINT private_projectile ~C0P%c0bw_projectile_serial%~
-          END
-          OUTER_SET c0bw_projectile_serial += 1
+          OUTER_SPRINT private_projectile $c0bw_private_names(~%slot%~)
+          OUTER_SET slot += 1
           COPY_EXISTING ~%original_projectile%.PRO~ ~override/%private_projectile%.PRO~
             WRITE_LONG 0x0c (THIS BOR 0x40)
           LAF c0bw_append_projectile INT_VAR projectile_base
@@ -940,8 +1047,16 @@ BEGIN
       END
 
     OUTER_SET ids_ready = 1
-    ACTION_IF preserve_projectiles AND payload_ready BEGIN
-      LAF c0bw_check_projectile_capacity INT_VAR donor_count RET ids_ready projectile_base END
+    ACTION_IF preserve_projectiles AND payload_ready AND donor_count > 0 BEGIN
+      LAF c0bw_read_projectile_index RET projectile_base index_ready has_missile
+        RET_ARRAY c0bw_ids_by_name c0bw_ids_by_number
+      END
+      LAF c0bw_check_projectile_capacity INT_VAR donor_count projectile_base index_ready has_missile
+        RET ids_ready projectile_base
+      END
+      ACTION_IF ids_ready BEGIN
+        LAF c0bw_plan_private_projectiles INT_VAR donor_count has_missile RET_ARRAY c0bw_private_names END
+      END
       ACTION_IF NOT ids_ready BEGIN
         PRINT ~Bardic Wonders #2004: no projectile IDs available for %bardsong_name%.SPL.~
       END
@@ -1045,7 +1160,6 @@ DEFINE_ACTION_FUNCTION c0bw_wrap_external_songs
   RET external_wrappers
   RET_ARRAY c0bw_damaged_resources
 BEGIN
-  OUTER_SET c0bw_projectile_serial = 0
   OUTER_SET external_wrappers = 0
   ACTION_PHP_EACH c0bw_eligible_songs AS song => unused BEGIN
     LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1 templates_ready = 1

@@ -332,6 +332,7 @@ class Component2004ProducerTests(unittest.TestCase):
             ids = resource(override, "PROJECTL.IDS")
             with ids.open("a", encoding="ascii") as out:
                 out.write("518 C0BARDSO\n")
+            self.seed_aligned_missiles(override, b"519 C0BARDSO\r\n")
             old = bytearray((MOD / "bardsong/c0bardso.PRO").read_bytes())
             old[0x0C] &= ~0x40
             old[0x2C] |= 0x40
@@ -1161,6 +1162,8 @@ class Component2004ProducerTests(unittest.TestCase):
                    + f"{last_id} C0BWSNP\r\n".encode("ascii"))
             index = resource(override, "PROJECTL.IDS")
             index.write_bytes(ids)
+            self.seed_aligned_missiles(override, b"522 C0BARDSO\r\n523 C0BWSPA\r\n"
+                                      + f"{last_id + 1} C0BWSNP\r\n".encode("ascii"))
             (override / "XQBADPRO.PRO").write_bytes(second_donor)
             song = bytearray((MOD / "abettor/c0abets2.spl").read_bytes())
             duplicate_first_ability(song)
@@ -1191,6 +1194,7 @@ class Component2004ProducerTests(unittest.TestCase):
                 b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n"
                 b"524 XQTAKEN\r\n523 C0BWSNP\r\n"
             )
+            self.seed_aligned_missiles(override)
             foreign = bytearray((MOD / "bardsong/c0bardx.spl").read_bytes())
             ability, = struct.unpack_from("<I", foreign, 0x64)
             struct.pack_into("<H", foreign, ability + 0x26, 525)
@@ -1222,6 +1226,7 @@ class Component2004ProducerTests(unittest.TestCase):
                 original = (b"IDS V1.0\r\n\r\n157 INAREAPA\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n"
                             + occupied + b"\r\n523 C0BWSNP\r\n")
                 ids.write_bytes(original)
+                self.seed_aligned_missiles(override)
                 missile = resource(override, "MISSILE.IDS")
                 original_missile = missile.read_bytes()
                 result = self.install(root)
@@ -1246,9 +1251,14 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertEqual(["525 C0BARDSO", "526 C0BWSPA", "527 C0BWSNP", "528 C0P0"],
                              ids.read_text().splitlines()[-4:])
-            self.assertEqual(["526 C0 Bardsong", "527 C0BWSPA", "528 C0BWSNP", "529 C0P0"],
+            self.assertEqual(["526 C0BARDSO", "527 C0BWSPA", "528 C0BWSNP", "529 C0P0"],
                              missile.read_text().splitlines()[-4:])
             self.assertIn("525 Taken label", missile.read_text().splitlines())
+
+    def seed_aligned_missiles(
+        self, override: Path, entries: bytes = b"522 C0BARDSO\r\n523 C0BWSPA\r\n524 C0BWSNP\r\n"
+    ) -> None:
+        resource(override, "MISSILE.IDS").write_bytes(b"IDS V1.0\r\n0 NONE\r\n" + entries)
 
     def seed_projectile_registry(self, override: Path, projectl: bytes, missile: bytes) -> tuple[Path, Path]:
         ids = resource(override, "PROJECTL.IDS")
@@ -1256,7 +1266,9 @@ class Component2004ProducerTests(unittest.TestCase):
             b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n523 C0BWSNP\r\n" + projectl
         )
         missiles = resource(override, "MISSILE.IDS")
-        missiles.write_bytes(b"IDS V1.0\r\n0 NONE\r\n" + missile)
+        self.seed_aligned_missiles(override)
+        with missiles.open("ab") as output:
+            output.write(missile)
         return ids, missiles
 
     def assert_projectile_pair(self, song: Path, ids: Path, missiles: Path, expected: int) -> None:
@@ -1280,7 +1292,7 @@ class Component2004ProducerTests(unittest.TestCase):
                 override = root / "override"
                 song, _ = self.seed_external_song_and_bard_text(override)
                 ids, missiles = self.seed_projectile_registry(
-                    override, occupied + b"\r\n// 99999 IGNORED", b"/* // */ 524 Taken label\r\n"
+                    override, occupied + b"\r\n// 99999 IGNORED", b"/* // */ 525 Taken label\r\n"
                 )
                 old = bytearray((MOD / "bardsong/c0bardx.spl").read_bytes())
                 ability, = struct.unpack_from("<I", old, 0x64)
@@ -1332,7 +1344,7 @@ class Component2004ProducerTests(unittest.TestCase):
                 self.make_fixture(root, existing_projectile=520, snapshot=False)
                 override = root / "override"
                 song, _ = self.seed_external_song_and_bard_text(override)
-                ids, missiles = self.seed_projectile_registry(override, b"530 XQTAKEN\r\n", b"524 XQMISLABEL\r\n")
+                ids, missiles = self.seed_projectile_registry(override, b"530 XQTAKEN\r\n", b"")
                 if not has_missile:
                     missiles.unlink()
 
@@ -1347,7 +1359,7 @@ class Component2004ProducerTests(unittest.TestCase):
             override = root / "override"
             song, _ = self.seed_external_song_and_bard_text(override)
             ids, missiles = self.seed_projectile_registry(
-                override, b"524 XQTAKEN\r\n", b"/* // */ 0xffff XQMISLABEL\r\n523 LAST\r\n"
+                override, b"524 XQTAKEN\r\n", b"/* // */ 0xffff XQMISLABEL\r\n520 LAST\r\n"
             )
             before = [path.read_bytes() for path in (ids, missiles, song)]
             result = self.install(root)
@@ -1356,14 +1368,16 @@ class Component2004ProducerTests(unittest.TestCase):
             self.assertEqual(before, [path.read_bytes() for path in (ids, missiles, song)])
             self.assertFalse(list(override.glob("C0P*.PRO")))
 
-    def assert_projectl_lookup(self, root: Path, symbol: str, number: int, expected_label: str) -> None:
+    def assert_projectl_lookup(
+        self, root: Path, symbol: str, number: int, expected_label: str, *, table: str = "PROJECTL"
+    ) -> None:
         (root / "lookup.tp2").write_text(
             "BACKUP ~lookup-backup~\nAUTHOR ~test~\nBEGIN ~Native PROJECTL lookups~\n"
             "CLEAR_IDS_MAP\n"
-            f"OUTER_SET found = IDS_OF_SYMBOL (~PROJECTL~ ~{symbol}~)\n"
+            f"OUTER_SET found = IDS_OF_SYMBOL (~{table}~ ~{symbol}~)\n"
             f"ACTION_IF found != {number} BEGIN FAIL ~Unexpected symbol ID %found%~ END\n"
             "OUTER_PATCH ~~ BEGIN\n"
-            f"  LOOKUP_IDS_SYMBOL_OF_INT label ~PROJECTL~ {number}\n"
+            f"  LOOKUP_IDS_SYMBOL_OF_INT label ~{table}~ {number}\n"
             f"  PATCH_IF ~%label%~ STRING_COMPARE_CASE ~{expected_label}~ BEGIN\n"
             "    PATCH_FAIL ~Unexpected label %label%~\n"
             "  END\nEND\n",
@@ -1383,6 +1397,7 @@ class Component2004ProducerTests(unittest.TestCase):
             song, _ = self.seed_external_song_and_bard_text(override)
             ids = resource(override, "PROJECTL.IDS")
             ids.write_bytes(b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n" + stock_and_taken)
+            self.seed_aligned_missiles(override)
             foreign = bytearray((MOD / "bardsong/c0bardx.spl").read_bytes())
             ability, = struct.unpack_from("<I", foreign, 0x64)
             struct.pack_into("<H", foreign, ability + 0x26, 525)
@@ -1411,6 +1426,7 @@ class Component2004ProducerTests(unittest.TestCase):
             ids.write_bytes(
                 b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO // note\r\n522 C0BWSPA\r\n523 C0BWSNP\r\n"
             )
+            self.seed_aligned_missiles(override, b"523 C0BWSPA\r\n524 C0BWSNP\r\n")
             missiles = resource(override, "MISSILE.IDS")
             result = self.install(root)
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
@@ -1431,11 +1447,111 @@ class Component2004ProducerTests(unittest.TestCase):
                 b"522 C0BWSPA\r\n523 C0BWSNP\r\n524 XQTAKEN\r\n"
             )
             missiles = resource(override, "MISSILE.IDS")
-            missiles.write_bytes(b"IDS V1.0\r\n527\r\n525 Other missile\r\n")
+            missiles.write_bytes(b"IDS V1.0\r\n527\r\n522 C0BARDSO\r\n523 C0BWSPA\r\n524 C0BWSNP\r\n525 Other missile\r\n")
 
             result = self.install(root)
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assert_projectile_pair(song, ids, missiles, 527)
+
+    def test_controller_binding_conflicts_use_private_projectiles(self) -> None:
+        for projectl, missile, conflict_max in (
+            (b"521 C0BARDSO\r\n521 XQFOREIGN\r\n", b"522 C0BARDSO\r\n", 523),
+            (b"521 XQFOREIGN\r\n521 C0BARDSO\r\n", b"522 C0BARDSO\r\n", 523),
+            (b"521 C0BARDSO\r\n527 C0BARDSO\r\n", b"528 C0BARDSO\r\n", 527),
+            (b"521 C0BARDSO\r\n", b"522 XQFOREIGN\r\n522 C0BARDSO\r\n", 523),
+            (b"", b"530 C0BARDSO\r\n", 529),
+        ):
+            with self.subTest(projectl=projectl, missile=missile), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                override = root / "override"
+                song, _ = self.seed_external_song_and_bard_text(override)
+                ids = resource(override, "PROJECTL.IDS")
+                original_ids = b"IDS V1.0\r\n157 INAREAPA\r\n522 C0BWSPA\r\n523 C0BWSNP\r\n" + projectl
+                ids.write_bytes(original_ids)
+                missiles = resource(override, "MISSILE.IDS")
+                original_missiles = b"IDS V1.0\r\n523 C0BWSPA\r\n524 C0BWSNP\r\n" + missile
+                missiles.write_bytes(original_missiles)
+                foreign = resource(override, "INAREAPA.PRO").read_bytes()
+                for name in ("C0BARDSO.PRO", "XQFOREIGN.PRO"):
+                    (override / name).write_bytes(foreign)
+
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(original_ids.splitlines(), ids.read_bytes().splitlines()[:-2])
+                self.assertEqual(original_missiles.splitlines(), missiles.read_bytes().splitlines()[:-2])
+                self.assertEqual(foreign, resource(override, "XQFOREIGN.PRO").read_bytes())
+                self.assertEqual(foreign, resource(override, "C0BARDSO.PRO").read_bytes())
+                self.assertEqual(conflict_max + 2, parse_spl(song).abilities[0].projectile)
+                self.assertEqual(f"{conflict_max + 1} C0P0", ids.read_text().splitlines()[-2])
+                self.assertEqual(f"{conflict_max + 2} C0P0", missiles.read_text().splitlines()[-2])
+                self.assertTrue(resource(override, "C0P0.PRO").read_bytes()[0x0C] & 0x40)
+                self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+
+    def test_stock_binding_alias_uses_private_projectile_in_owned_song(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            owned_song = override / "SPCL542A.SPL"
+            owned_song.write_bytes(song.read_bytes())
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(
+                b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BWSPA\r\n521 XQFOREIGN\r\n"
+                b"522 C0BARDSO\r\n523 C0BWSNP\r\n"
+            )
+            self.seed_aligned_missiles(override, b"522 C0BWSPA\r\n523 C0BARDSO\r\n524 C0BWSNP\r\n")
+            foreign = resource(override, "INAREAPA.PRO").read_bytes()
+            (override / "XQFOREIGN.PRO").write_bytes(foreign)
+            (override / "C0BWSPA.PRO").write_bytes(foreign)
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(["521 C0BWSPA", "521 XQFOREIGN"], [line for line in ids.read_text().splitlines()
+                                                              if line.startswith("521 ")])
+            self.assertEqual(foreign, resource(override, "XQFOREIGN.PRO").read_bytes())
+            self.assertEqual(foreign, resource(override, "C0BWSPA.PRO").read_bytes())
+            pulse = parse_spl(owned_song).find_effects(opcode=272)[0].resource
+            self.assertEqual(525, parse_spl(resource(override, f"{pulse}.SPL")).abilities[0].projectile)
+            self.assertIn("524 C0P0", ids.read_text().splitlines())
+            self.assertTrue(resource(override, "C0P0.PRO").read_bytes()[0x0C] & 0x40)
+
+    def test_private_projectile_skips_existing_missile_only_name(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            ids, missiles = self.seed_projectile_registry(override, b"", b"530 C0P0\r\n")
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual("530 C0P1", ids.read_text().splitlines()[-1])
+            self.assertEqual(["530 C0P0", "531 C0P1"], missiles.read_text().splitlines()[-2:])
+            self.assert_projectl_lookup(root, "C0P0", 530, "C0P0", table="MISSILE")
+            self.assertFalse((override / "C0P0.PRO").exists())
+            self.assertTrue(resource(override, "C0P1.PRO").read_bytes()[0x0C] & 0x40)
+            pulse = parse_spl(song).find_effects(opcode=272)[0].resource
+            self.assertEqual(531, parse_spl(resource(override, f"{pulse}.SPL")).abilities[0].projectile)
+
+    def test_exclusive_controller_and_party_bindings_are_reused(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            ids, missiles = self.seed_projectile_registry(override, b"", b"")
+            ids.write_bytes(ids.read_bytes().replace(b"521 C0BARDSO", b"521 c0bardso"))
+            missiles.write_bytes(missiles.read_bytes().replace(b"523 C0BWSPA", b"523 c0bwspa"))
+            original_ids, original_missiles = ids.read_bytes(), missiles.read_bytes()
+            shared = resource(override, "INAREAPA.PRO").read_bytes()
+            for name in ("C0BARDSO.PRO", "C0BWSPA.PRO"):
+                (override / name).write_bytes(shared)
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            song = parse_spl(resource(override, "C0ABETS2.SPL"))
+            self.assertEqual(522, song.abilities[0].projectile)
+            pulse = song.find_effects(opcode=272)[0].resource
+            self.assertEqual(523, parse_spl(resource(override, f"{pulse}.SPL")).abilities[0].projectile)
+            self.assertEqual(original_ids, ids.read_bytes())
+            self.assertEqual(original_missiles, missiles.read_bytes())
+            self.assertFalse(list(override.glob("C0P*.PRO")))
+            for name in ("C0BARDSO.PRO", "C0BWSPA.PRO"):
+                self.assertTrue(resource(override, name).read_bytes()[0x0C] & 0x40)
 
     def test_fallback_excludes_one_shot_cast_cue_from_repeat_candidates(self) -> None:
         for cue_opcodes in ((177,), (177, 272)):
