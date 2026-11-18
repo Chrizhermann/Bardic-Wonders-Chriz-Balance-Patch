@@ -204,6 +204,36 @@ def external_assignment_with_late_casting(*, multiple: bool = False, capacity: i
     return bytes(caller)
 
 
+def assignment_parity_fixtures() -> dict[str, bytes]:
+    canonical = (MOD / "abettor/c0abethl.spl").read_bytes()
+    header, _, table = struct.unpack_from("<IHI", canonical, 0x64)
+    match = canonical[table:table + 48].replace(b"C0ABETS2", b"XQSONG\0\0")
+    other = match.replace(b"XQSONG", b"XQELSE")
+    neutral = struct.pack("<H", 101) + bytes(46)
+    casting = bytearray(struct.pack("<H", 139) + bytes(range(2, 48)))
+    casting[4:15] = b"%song_name%"
+    casting[29:44] = b"%bardsong_name%"
+    casting[44] = 0
+
+    def packed(abilities, globals_=(), trailer=b""):
+        data = bytearray(canonical[:0x72] + canonical[header:header + 40] * len(abilities))
+        struct.pack_into("<IHIHH", data, 0x64, 0x72, len(abilities), len(data), 0, len(globals_))
+        data.extend(b"".join(globals_))
+        first = len(globals_)
+        for index, records in enumerate(abilities):
+            struct.pack_into("<HH", data, 0x72 + index * 40 + 0x1E, len(records), first)
+            data.extend(b"".join(records))
+            first += len(records)
+        return bytes(data) + trailer
+
+    return {
+        "XQMULTI": packed(((other, match), (match, neutral, other), (match,))),
+        "XQGL": packed(((other, match, neutral), (match,)), (match,)),
+        "XQCROSS": packed(((match,), (other, match))),
+        "XQOPAQUE": packed(((match, neutral),), (bytes(casting),), b"TRAILER\0%SOURCE_RES%"),
+    }
+
+
 class Component2004ProducerTests(unittest.TestCase):
     def make_fixture(self, root: Path, *, existing_projectile: int, reserve_payload_name: bool = False, snapshot: bool = True) -> None:
         override = root / "override"
@@ -759,6 +789,143 @@ class Component2004ProducerTests(unittest.TestCase):
             loader = resource(override, "C0BARDX.SPL")
             self.assertEqual(0xFFFF, struct.unpack_from("<H", loader.read_bytes(), 0x90)[0])
             self.assertEqual(pulse, parse_spl(loader).abilities[0].effects[-1].resource)
+
+    def test_compound_assignments_match_legacy_global_and_ability_traversal(self) -> None:
+        def opcodes(records):
+            return tuple(struct.unpack_from("<H", record)[0] for record in records)
+
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, _ = self.seed_external_song_and_bard_text(override)
+            fixtures = assignment_parity_fixtures()
+            for name in ("XQMULTI", "XQGL"):
+                (override / f"{name}.SPL").write_bytes(fixtures[name])
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            pulse = next(e.resource for e in parse_spl(song).abilities[0].effects if e.opcode == 272)
+            pairs = (326, 309) * 3
+            patterns = {
+                "XQMULTI": ((), ((251,) + pairs + (251,), pairs + (251, 101, 251), pairs + (251,))),
+                "XQGL": (pairs + (251,), ((251,) + pairs + (251, 101), pairs + (251,))),
+            }
+            for name, pattern in patterns.items():
+                with self.subTest(name=name):
+                    path = override / f"{name}.SPL"
+                    casting, abilities = effect_records(path)
+                    self.assertEqual(pattern, (opcodes(casting), tuple(map(opcodes, abilities))))
+                    records = casting + tuple(record for ability in abilities for record in ability)
+                    for opcode, target in ((326, "C0BARDX"), (309, pulse)):
+                        self.assertEqual(9, sum(
+                            struct.unpack_from("<H", record)[0] == opcode
+                            and record[0x14:0x1C].split(b"\0", 1)[0].decode("ascii") == target
+                            for record in records
+                        ))
+
+    def test_prior_ability_trigger_can_shift_into_the_current_loop(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            self.seed_external_song_and_bard_text(override)
+            caller = override / "XQCROSS.SPL"
+            caller.write_bytes(assignment_parity_fixtures()["XQCROSS"])
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            spell = parse_spl(caller)
+            pairs = [326, 309] * 4
+            self.assertEqual(pairs + [251], [e.opcode for e in spell.abilities[0].effects])
+            self.assertEqual([251] + pairs + [251], [e.opcode for e in spell.abilities[1].effects])
+
+    def test_assignment_writer_preserves_binary_casting_and_trailing_bytes(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            self.seed_external_song_and_bard_text(override)
+            caller = override / "XQOPAQUE.SPL"
+            caller.write_bytes(assignment_parity_fixtures()["XQOPAQUE"])
+            casting, abilities = effect_records(caller)
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            after_casting, after_abilities = effect_records(caller)
+            self.assertEqual(casting, after_casting)
+            self.assertEqual(abilities[0], after_abilities[0][2:])
+            self.assertTrue(caller.read_bytes().endswith(b"TRAILER\0%SOURCE_RES%"))
+            self.assertEqual([326, 309, 251, 101], [e.opcode for e in parse_spl(caller).abilities[0].effects])
+
+    def test_stale_state_is_deactivated_before_a_later_description_pass(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, text = self.seed_external_song_and_bard_text(override)
+            baseline_song, baseline_text = song.read_bytes(), text.read_bytes()
+            self.seed_bard_clabs(override, "AP_C0BARDX")
+            baseline_state = b"2DA V1.0\n0\n FINITE\nACTIVE 1\n"
+            marker = override / "C0BWSYS.2DA"
+            marker.write_bytes(baseline_state)
+            (root / "testmod/bardsong/c0bardx.spl").write_bytes(b"SPL V1  ")
+
+            # Use the real component identity so the later description pass
+            # sees #2004 as installed, independently of its state marker.
+            source = (root / "testmod/setup-test.tp2").read_text(encoding="ascii")
+            tp2 = root / "testmod/Setup-BardicWonders.tp2"
+            tp2.write_text(
+                source.replace("ALWAYS\n", "ALWAYS\nINCLUDE ~testmod/lib/bardsong_description.tpa~\n")
+                + "\nBEGIN ~Later Bard description pass~ DESIGNATED 2012\n"
+                "ACTION_IF NOT MOD_IS_INSTALLED ~Setup-BardicWonders.tp2~ ~2004~ BEGIN "
+                "FAIL ~Missing song component in fixture~ END\n"
+                "LAF c0bw_write_song_description INT_VAR current_component = 2012 END\n",
+                encoding="ascii",
+            )
+            args = [str(WEIDU), str(tp2), "--no-auto-tp2", "--noautoupdate", "--no-exit-pause",
+                    "--game", str(root), "--language", "0"]
+            result = subprocess.run(args + ["--force-install-list", "2004"], cwd=root, text=True,
+                                    capture_output=True, timeout=60)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(["ACTIVE", "0"], marker.read_text().split()[-2:])
+            self.assertEqual(baseline_song, song.read_bytes())
+            self.assertEqual(baseline_text, text.read_bytes())
+            self.assertNotIn("AP_C0BARDX", resource(override, "CLABBA01.2DA").read_text().split())
+            result = subprocess.run(args + ["--force-install-list", "2012"], cwd=root, text=True,
+                                    capture_output=True, timeout=60)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(baseline_text, text.read_bytes())
+
+    def test_missing_core_pulse_template_prevents_publication(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, text = self.seed_external_song_and_bard_text(override)
+            self.seed_bard_clabs(override)
+            baseline_song, baseline_text = song.read_bytes(), text.read_bytes()
+            (root / "testmod/bardsong/c0bardso.EFF").write_bytes(b"EFF V2.0")
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.count("skipping damaged C0BARDSO.EFF"))
+            self.assertEqual(baseline_song, song.read_bytes())
+            self.assertEqual(baseline_text, text.read_bytes())
+            self.assertFalse((override / "C0BWSYS.2DA").exists())
+            self.assertNotIn("AP_C0BARDX", resource(override, "CLABBA01.2DA").read_text().split())
+
+    def test_installed_core_pulse_template_fallback_activates_the_song_runtime(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            song, text = self.seed_external_song_and_bard_text(override)
+            self.seed_bard_clabs(override)
+            packaged = root / "testmod/bardsong/c0bardso.EFF"
+            installed = override / "C0BARDSO.EFF"
+            canonical = packaged.read_bytes()
+            installed.write_bytes(canonical)
+            packaged.write_bytes(b"EFF V2.0")
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.count("skipping damaged C0BARDSO.EFF"))
+            self.assertEqual(canonical, installed.read_bytes())
+            pulse = next(effect.resource for effect in parse_spl(song).abilities[0].effects if effect.opcode == 272)
+            self.assertEqual(pulse, read_eff_resource(resource(override, f"{pulse}.EFF")))
+            self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+            self.assertIn("AP_C0BARDX", resource(override, "CLABBA01.2DA").read_text().split())
+            self.assertIn("six rounds", tlk_string(root / "dialog.tlk", int(text.read_text().split()[-1])))
 
     def test_projectile_donor_requires_all_type_specific_blocks(self) -> None:
         source = (MOD / "bardsong/c0bardso.PRO").read_bytes()

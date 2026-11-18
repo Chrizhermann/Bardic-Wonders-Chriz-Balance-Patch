@@ -2,8 +2,21 @@
 DEFINE_ACTION_FUNCTION c0bw_write_song_description
   INT_VAR current_component = 2004
 BEGIN
+  OUTER_SET song_active = 0
   ACTION_IF FILE_EXISTS_IN_GAME ~C0BWSYS.2DA~
     AND (current_component = 2004 OR MOD_IS_INSTALLED ~Setup-BardicWonders.tp2~ ~2004~) BEGIN
+    COPY_EXISTING ~C0BWSYS.2DA~ ~override~
+      READ_2DA_ENTRIES_NOW song_state 2
+      FOR (row = 0; row < song_state; ++row) BEGIN
+        READ_2DA_ENTRY_FORMER song_state row 0 key
+        READ_2DA_ENTRY_FORMER song_state row 1 value
+        PATCH_IF ~%key%~ STRING_EQUAL_CASE ~ACTIVE~ AND ~%value%~ STRING_EQUAL ~1~ BEGIN
+          SET song_active = 1
+        END
+      END
+    BUT_ONLY
+  END
+  ACTION_IF song_active BEGIN
     OUTER_SPRINT bard_song_description ~The Bard can sing at will. A song lasts six rounds, plus one round for every five Bard levels. After activating a song, the Bard must wait one turn to sing again. The standard song protects allies from fear and morale failure, and grants +1 Luck. Luck rises to +2 at level 15 and +3 at level 20.~
     ACTION_IF GAME_IS ~iwdee~ BEGIN
       OUTER_SPRINT bard_song_description ~The Bard can perform the following songs while the Bard Song modal is active.

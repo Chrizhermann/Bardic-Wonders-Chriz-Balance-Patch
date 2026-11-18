@@ -165,31 +165,111 @@ DEFINE_PATCH_MACRO c0bw_guard_projectile BEGIN
   END
 END
 
-// Repack the referenced effect region in casting/ability order. The header
-// and ability-table locations, and bytes beyond the last effect, stay put.
-DEFINE_PATCH_FUNCTION c0bw_write_effect_slices
-  INT_VAR ability_table = 0 ability_count = 0 effect_table = 0 last_effect = 0 new_total = 0
-BEGIN
-  DELETE_BYTES effect_table (last_effect * 0x30)
-  INSERT_BYTES effect_table (new_total * 0x30)
-  SET first = 0
-  FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
-    SPRINT records $c0bw_output(~%bucket%~)
-    SET bytes = STRING_LENGTH ~%records%~
-    SET count = bytes / 0x30
-    PATCH_IF bucket = 0 BEGIN
-      WRITE_SHORT 0x6E 0
-      WRITE_SHORT 0x70 count
-    END ELSE BEGIN
-      SET header = ability_table + (bucket - 1) * 0x28
-      WRITE_SHORT (header + 0x20) first
-      WRITE_SHORT (header + 0x1E) count
+// Core assets are checked once, before modifying callers or publishing grants.
+// Valid packaged resources own the result; a valid installed copy is a fallback.
+DEFINE_PATCH_MACRO c0bw_guard_core_asset BEGIN
+  PATCH_MATCH asset_type WITH
+    0 BEGIN
+      LPM c0bw_guard_spl
+      PATCH_IF c0bw_valid BEGIN
+        PATCH_IF SHORT_AT 0x68 = 0 BEGIN
+          SET c0bw_valid = 0
+          LPM c0bw_record_damage
+        END
+      END
     END
-    PATCH_IF bytes > 0 BEGIN
-      WRITE_ASCIIE (effect_table + first * 0x30) ~%records%~ (bytes)
-    END
-    SET first += count
+    1 BEGIN LPM c0bw_guard_song_loader END
+    2 BEGIN LPM c0bw_guard_eff END
+    3 BEGIN LPM c0bw_guard_projectile END
+    DEFAULT SET c0bw_valid = 0
   END
+END
+
+DEFINE_ACTION_FUNCTION c0bw_resolve_core_asset
+  INT_VAR asset_type = 0
+  STR_VAR packaged = "" asset = "" missile_name = ""
+  RET ready
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  OUTER_SET ready = 0
+  OUTER_SPRINT extension SPL
+  ACTION_IF asset_type = 2 BEGIN OUTER_SPRINT extension EFF END
+  ACTION_IF asset_type = 3 BEGIN OUTER_SPRINT extension PRO END
+  OUTER_SPRINT filename ~%asset%.%extension%~
+  ACTION_IF FILE_EXISTS ~%packaged%~ BEGIN
+    COPY ~%packaged%~ ~override~
+      LPM c0bw_guard_core_asset
+      SET ready = c0bw_valid
+    BUT_ONLY
+  END ELSE BEGIN
+    PRINT ~Bardic Wonders #2004: missing packaged %filename%.~
+  END
+  ACTION_IF ready BEGIN
+    COPY ~%packaged%~ ~override/%filename%~
+  END ELSE ACTION_IF FILE_EXISTS_IN_GAME ~%filename%~ BEGIN
+    COPY_EXISTING ~%filename%~ ~override~
+      LPM c0bw_guard_core_asset
+      SET ready = c0bw_valid
+    BUT_ONLY
+  END
+  ACTION_IF ready AND asset_type = 3 BEGIN
+    // Register already-validated bytes with WeiDU and retain any existing ID.
+    ACTION_IF NOT FILE_EXISTS ~override/%filename%~ BEGIN
+      COPY_EXISTING ~%filename%~ ~override/%filename%~
+    END
+    COPY_EXISTING ~%filename%~ ~override~
+      WRITE_LONG 0x0C (THIS BOR 0x40)
+    BUT_ONLY
+    ACTION_IF ~%missile_name%~ STRING_COMPARE ~~ BEGIN
+      ADD_PROJECTILE ~override/%asset%.PRO~ ~%missile_name%~
+    END ELSE BEGIN
+      ADD_PROJECTILE ~override/%asset%.PRO~
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION c0bw_resolve_wrapper_templates
+  RET templates_ready
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  LAF c0bw_resolve_core_asset
+    STR_VAR asset = ~C0BARDSO~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardso.spl~
+    RET controller_ready = ready RET_ARRAY c0bw_damaged_resources
+  END
+  LAF c0bw_resolve_core_asset INT_VAR asset_type = 2
+    STR_VAR asset = ~C0BARDSO~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardso.EFF~
+    RET pulse_template_ready = ready RET_ARRAY c0bw_damaged_resources
+  END
+  OUTER_SET templates_ready = controller_ready AND pulse_template_ready
+END
+
+// Stage a packed table before the old one. Work with integers so WeiDU never
+// interpolates a literal percent sequence or treats a NUL as a terminator.
+DEFINE_PATCH_MACRO c0bw_stage_effect_table BEGIN
+  INSERT_BYTES effect_table (new_total * 0x30)
+  SET source_table = effect_table + new_total * 0x30
+  SET output_first = 0
+  SET output_index = 0
+END
+
+DEFINE_PATCH_MACRO c0bw_copy_effect_record BEGIN
+  FOR (word = 0; word < 0x30; word += 4) BEGIN
+    READ_LONG (source_effect + word) effect_word
+    WRITE_LONG (destination_effect + word) effect_word
+  END
+END
+
+DEFINE_PATCH_MACRO c0bw_finish_effect_slice BEGIN
+  SET output_count = output_index - output_first
+  PATCH_IF bucket = 0 BEGIN
+    WRITE_SHORT 0x6E 0
+    WRITE_SHORT 0x70 output_count
+  END ELSE BEGIN
+    SET header = ability_table + (bucket - 1) * 0x28
+    WRITE_SHORT (header + 0x20) output_first
+    WRITE_SHORT (header + 0x1E) output_count
+  END
+  SET output_first = output_index
 END
 
 DEFINE_PATCH_FUNCTION c0bw_write_song_effect
@@ -219,81 +299,100 @@ BEGIN
     RET_ARRAY c0bw_first c0bw_count
   END
   SET c0bw_extended = 0
-  SET new_total = 0
-  PATCH_CLEAR_ARRAY c0bw_output
+  SET finale_count = ability_count < 11 ? ability_count : 11
+  SET new_total = ability_count + (symphony ? finale_count : 0)
   FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
     SET first = $c0bw_first(~%bucket%~)
     SET count = $c0bw_count(~%bucket%~)
-    SPRINT records ~~
-    PATCH_IF count > 0 BEGIN
-      READ_ASCII (effect_table + first * 0x30) records (count * 0x30)
-    END
-    PATCH_IF bucket > 0 BEGIN
-      INNER_PATCH_SAVE records ~%records%~ BEGIN
-        PATCH_IF strip_messages BEGIN
-          FOR (i = count - 1; i >= 0; --i) BEGIN
-            READ_SHORT (i * 0x30) old_opcode
-            PATCH_IF old_opcode = 139 OR old_opcode = 136 BEGIN
-              DELETE_BYTES (i * 0x30) 0x30
-            END
-          END
+    SET new_total += count
+    PATCH_IF strip_messages AND bucket > 0 BEGIN
+      FOR (i = 0; i < count; ++i) BEGIN
+        READ_SHORT (effect_table + (first + i) * 0x30) old_opcode
+        PATCH_IF old_opcode = 139 OR old_opcode = 136 BEGIN
+          SET new_total -= 1
         END
-        SET append_at = BUFFER_LENGTH
-        INSERT_BYTES append_at 0x30
+      END
+    END
+  END
+  PATCH_IF new_total <= 0xFFFF BEGIN
+    LPM c0bw_stage_effect_table
+    FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
+      SET first = $c0bw_first(~%bucket%~)
+      SET count = $c0bw_count(~%bucket%~)
+      FOR (i = 0; i < count; ++i) BEGIN
+        SET source_effect = source_table + (first + i) * 0x30
+        READ_SHORT source_effect old_opcode
+        PATCH_IF bucket = 0 OR NOT strip_messages OR (old_opcode != 139 AND old_opcode != 136) BEGIN
+          SET destination_effect = effect_table + output_index * 0x30
+          LPM c0bw_copy_effect_record
+          SET output_index += 1
+        END
+      END
+      PATCH_IF bucket > 0 BEGIN
+        SET append_at = effect_table + output_index * 0x30
         LPF c0bw_write_song_effect
           INT_VAR offset = append_at opcode target timing duration parameter2
           STR_VAR resource
         END
+        SET output_index += 1
         PATCH_IF symphony AND bucket <= 11 BEGIN
-          SET append_at = BUFFER_LENGTH
-          INSERT_BYTES append_at 0x30
+          SET append_at = effect_table + output_index * 0x30
           LPF c0bw_write_song_effect INT_VAR offset = append_at opcode = 326 target = 9 timing = 4
             duration = (600 + (bucket - 1) * 100 + 14) / 15
             STR_VAR resource = ~C0ABIVI~
           END
+          SET output_index += 1
         END
       END
+      LPM c0bw_finish_effect_slice
     END
-    SPRINT $c0bw_output(~%bucket%~) ~%records%~
-    SET new_total += STRING_LENGTH ~%records%~ / 0x30
-  END
-  PATCH_IF new_total <= 0xFFFF BEGIN
-    LPF c0bw_write_effect_slices INT_VAR ability_table ability_count effect_table last_effect new_total END
+    DELETE_BYTES source_table (last_effect * 0x30)
     SET c0bw_extended = 1
   END ELSE BEGIN
     LPM c0bw_record_capacity
   END
 END
 
-// Replay the legacy direct-op251 traversal without moving the records it
-// visits. Each pass adds a pair before every match; count that displacement
-// within each ability and stop as soon as the plan exceeds the available slots.
+// Replay the legacy loop's absolute indices. Each ability snapshots its
+// current bounds. Each pair of CLONE_EFFECT calls shifts original opcode
+// 251 records by two slots per cloned donor at or before that record. A
+// trigger from a preceding slice can shift into the frozen loop range.
 DEFINE_PATCH_FUNCTION c0bw_assignment_passes
-  INT_VAR ability_count = 0 effect_table = 0 limit = 0
-  STR_VAR bardsong_name = ""
+  INT_VAR ability_count = 0 trigger_count = 0 limit = 0
   RET passes
 BEGIN
   SET passes = 0
+  SET packed_start = $c0bw_count(~0~)
+  SET preceding_matches = $c0bw_matches(~0~)
   FOR (bucket = 1; bucket <= ability_count AND passes <= limit; ++bucket) BEGIN
-    SET first = $c0bw_first(~%bucket%~)
     SET count = $c0bw_count(~%bucket%~)
-    SET snapshot_count = count + 2 * passes * $c0bw_matches(~%bucket%~)
-    SET leading_matches = 0
-    FOR (i = 0; i < count AND passes <= limit; ++i) BEGIN
-      SET offset = effect_table + (first + i) * 0x30
-      PATCH_IF SHORT_AT offset = 251 BEGIN
-        READ_ASCII (offset + 0x14) assigned (8) NULL
-        PATCH_IF ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
-          SET leading_matches += 1
-        END
-        PATCH_IF i + 2 * passes * leading_matches < snapshot_count BEGIN
-          SET passes += 1
-          WHILE leading_matches > 0 AND passes <= limit AND i + 2 * passes * leading_matches < snapshot_count BEGIN
-            SET passes += 1
-          END
+    SET bucket_matches = $c0bw_matches(~%bucket%~)
+    SET cursor = packed_start + 2 * passes * preceding_matches
+    SET snapshot_end = cursor + count + 2 * passes * bucket_matches
+    WHILE cursor < snapshot_end AND passes <= limit BEGIN
+      // Live trigger positions are monotonic, even after insertions.
+      SET lower = 0
+      SET upper = trigger_count
+      WHILE lower < upper BEGIN
+        SET middle = (lower + upper) / 2
+        SET position = $c0bw_trigger_index(~%middle%~) + 2 * passes * $c0bw_trigger_prefix(~%middle%~)
+        PATCH_IF position < cursor BEGIN
+          SET lower = middle + 1
+        END ELSE BEGIN
+          SET upper = middle
         END
       END
+      SET position = snapshot_end
+      PATCH_IF lower < trigger_count BEGIN
+        SET position = $c0bw_trigger_index(~%lower%~) + 2 * passes * $c0bw_trigger_prefix(~%lower%~)
+      END
+      PATCH_IF position < snapshot_end BEGIN
+        SET passes += 1
+      END
+      SET cursor = position + 1
     END
+    SET preceding_matches += bucket_matches
+    SET packed_start += count
   END
 END
 
@@ -307,7 +406,11 @@ BEGIN
       RET_ARRAY c0bw_first c0bw_count
     END
     SET matches = 0
+    SET packed_start = 0
+    SET trigger_count = 0
     PATCH_CLEAR_ARRAY c0bw_matches
+    PATCH_CLEAR_ARRAY c0bw_trigger_index
+    PATCH_CLEAR_ARRAY c0bw_trigger_prefix
     FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
       SET first = $c0bw_first(~%bucket%~)
       SET count = $c0bw_count(~%bucket%~)
@@ -315,69 +418,75 @@ BEGIN
       FOR (i = 0; i < count; ++i) BEGIN
         SET offset = effect_table + (first + i) * 0x30
         PATCH_IF SHORT_AT offset = 251 BEGIN
-          READ_ASCII (offset + 0x14) assigned (8) NULL
-          PATCH_IF ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
+          READ_ASCII (offset + 0x14) assigned
+          // CLONE_EFFECT's default limit is 999 matches per slice.
+          PATCH_IF (NOT external OR bucket_matches < 999)
+            AND ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
             SET bucket_matches += 1
+          END
+          PATCH_IF external BEGIN
+            SET $c0bw_trigger_index(~%trigger_count%~) = packed_start + i
+            SET $c0bw_trigger_prefix(~%trigger_count%~) = matches + bucket_matches
+            SET trigger_count += 1
           END
         END
       END
       SET $c0bw_matches(~%bucket%~) = bucket_matches
       SET matches += bucket_matches
+      SET packed_start += count
     END
     PATCH_IF matches > 0 BEGIN
       SET limit = (0xFFFF - total_count) / (2 * matches)
       SET passes = 1
       PATCH_IF external BEGIN
-        LPF c0bw_assignment_passes INT_VAR ability_count effect_table limit STR_VAR bardsong_name RET passes END
+        LPF c0bw_assignment_passes INT_VAR ability_count trigger_count limit RET passes END
       END
       PATCH_IF passes > limit BEGIN
         LPM c0bw_record_capacity
       END ELSE PATCH_IF passes > 0 BEGIN
-        PATCH_CLEAR_ARRAY c0bw_output
+        SET new_total = total_count + 2 * matches * passes
+        LPM c0bw_stage_effect_table
         FOR (bucket = 0; bucket <= ability_count; ++bucket) BEGIN
           SET first = $c0bw_first(~%bucket%~)
           SET count = $c0bw_count(~%bucket%~)
-          SPRINT records ~~
-          PATCH_IF count > 0 BEGIN
-            READ_ASCII (effect_table + first * 0x30) records (count * 0x30)
-          END
-          PATCH_IF $c0bw_matches(~%bucket%~) > 0 BEGIN
-            INNER_PATCH_SAVE records ~%records%~ BEGIN
-              FOR (i = count - 1; i >= 0; --i) BEGIN
-                SET offset = i * 0x30
-                PATCH_IF SHORT_AT offset = 251 BEGIN
-                  READ_ASCII (offset + 0x14) assigned (8) NULL
-                  PATCH_IF ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
-                    READ_ASCII offset original (0x30)
-                    INSERT_BYTES offset (passes * 0x60)
-                    FOR (pass = 0; pass < passes; ++pass) BEGIN
-                      SET clone = offset + pass * 0x60
-                      WRITE_ASCIIE clone ~%original%~ (0x30)
-                      WRITE_SHORT clone 326
-                      WRITE_BYTE (clone + 2) 2
-                      WRITE_LONG (clone + 4) 0
-                      WRITE_LONG (clone + 8) 0
-                      WRITE_BYTE (clone + 0x0C) 1
-                      WRITE_ASCII (clone + 0x14) ~C0BARDX~ (8)
-                      SET clone += 0x30
-                      WRITE_ASCIIE clone ~%original%~ (0x30)
-                      WRITE_SHORT clone 309
-                      WRITE_BYTE (clone + 2) 2
-                      WRITE_LONG (clone + 4) 1
-                      WRITE_LONG (clone + 8) 0
-                      WRITE_BYTE (clone + 0x0C) 4
-                      WRITE_LONG (clone + 0x0E) 1
-                      WRITE_ASCIIE (clone + 0x14) ~%song_name%~ (8)
-                    END
-                  END
+          SET matches_left = $c0bw_matches(~%bucket%~)
+          FOR (i = 0; i < count; ++i) BEGIN
+            SET source_effect = source_table + (first + i) * 0x30
+            PATCH_IF matches_left > 0 AND SHORT_AT source_effect = 251 BEGIN
+              READ_ASCII (source_effect + 0x14) assigned
+              PATCH_IF ~%assigned%~ STRING_EQUAL_CASE ~%bardsong_name%~ BEGIN
+                SET matches_left -= 1
+                FOR (pass = 0; pass < passes; ++pass) BEGIN
+                  SET destination_effect = effect_table + output_index * 0x30
+                  LPM c0bw_copy_effect_record
+                  WRITE_SHORT destination_effect 326
+                  WRITE_BYTE (destination_effect + 2) 2
+                  WRITE_LONG (destination_effect + 4) 0
+                  WRITE_LONG (destination_effect + 8) 0
+                  WRITE_BYTE (destination_effect + 0x0C) 1
+                  WRITE_ASCII (destination_effect + 0x14) ~C0BARDX~ (8)
+                  SET output_index += 1
+
+                  SET destination_effect = effect_table + output_index * 0x30
+                  LPM c0bw_copy_effect_record
+                  WRITE_SHORT destination_effect 309
+                  WRITE_BYTE (destination_effect + 2) 2
+                  WRITE_LONG (destination_effect + 4) 1
+                  WRITE_LONG (destination_effect + 8) 0
+                  WRITE_BYTE (destination_effect + 0x0C) 4
+                  WRITE_LONG (destination_effect + 0x0E) 1
+                  WRITE_ASCIIE (destination_effect + 0x14) ~%song_name%~ (8)
+                  SET output_index += 1
                 END
               END
             END
+            SET destination_effect = effect_table + output_index * 0x30
+            LPM c0bw_copy_effect_record
+            SET output_index += 1
           END
-          SPRINT $c0bw_output(~%bucket%~) ~%records%~
+          LPM c0bw_finish_effect_slice
         END
-        SET new_total = total_count + 2 * matches * passes
-        LPF c0bw_write_effect_slices INT_VAR ability_table ability_count effect_table last_effect new_total END
+        DELETE_BYTES source_table (last_effect * 0x30)
       END
     END
   END
@@ -450,7 +559,7 @@ END
 // Register known finite songs by resref. The source payload contributes its
 // effects. This component owns every payload projectile and the controller.
 DEFINE_ACTION_FUNCTION c0bw_wrap_song
-  INT_VAR payload_projectile = 1 preserve_projectiles = 0
+  INT_VAR payload_projectile = 1 preserve_projectiles = 0 templates_ready = 0
   STR_VAR bardsong_name = ""
   RET song_name
   RET_ARRAY c0bw_damaged_resources
@@ -466,16 +575,12 @@ BEGIN
       LPM c0bw_guard_song_loader
       SET source_song_valid = source_song_valid AND c0bw_valid
     BUT_ONLY
-    COPY ~%MOD_FOLDER%/bardsong/c0bardso.spl~ ~override~
-      LPM c0bw_guard_spl
-      SET source_song_valid = source_song_valid AND c0bw_valid
-    BUT_ONLY
-    COPY ~%MOD_FOLDER%/bardsong/c0bardso.eff~ ~override~
-      LPM c0bw_guard_eff
-      SET source_song_valid = source_song_valid AND c0bw_valid
-    BUT_ONLY
   END
-  ACTION_IF source_song_valid BEGIN
+  // Individual callers may use the wrapper outside the #2004 batch.
+  ACTION_IF source_song_valid AND NOT templates_ready BEGIN
+    LAF c0bw_resolve_wrapper_templates RET templates_ready RET_ARRAY c0bw_damaged_resources END
+  END
+  ACTION_IF source_song_valid AND templates_ready BEGIN
     OUTER_PATCH ~~ BEGIN
       LPF GET_UNIQUE_FILE_NAME STR_VAR extension = ~SPL~ base = EVAL ~%bardsong_name%~ RET song_name = filename END
       INNER_PATCH_SAVE song_name ~%song_name%~ BEGIN
@@ -509,10 +614,10 @@ BEGIN
       LPF c0bw_alter_song_effects
         STR_VAR match_resource = EVAL ~%bardsong_name%~ resource = EVAL ~%song_name%~
       END
-    COPY ~%MOD_FOLDER%/bardsong/c0bardso.spl~ ~override/%bardsong_name%.SPL~
+    COPY_EXISTING ~C0BARDSO.SPL~ ~override/%bardsong_name%.SPL~
       LPF ALTER_SPELL_HEADER INT_VAR projectile = c0bardso END
       LPF c0bw_alter_song_effects STR_VAR match_resource = ~BARDSONG~ resource = EVAL ~%song_name%~ END
-    COPY ~%MOD_FOLDER%/bardsong/c0bardso.eff~ ~override/%song_name%.EFF~
+    COPY_EXISTING ~C0BARDSO.EFF~ ~override/%song_name%.EFF~
       WRITE_ASCIIE 0x30 ~%song_name%~ (8)
 
     ACTION_FOR_EACH baldur_script IN baldur bdbaldur baldur25 BEGIN
@@ -531,7 +636,7 @@ BEGIN
   ACTION_CLEAR_ARRAY c0bw_eligible_songs
 
   // The stock modal and these kit songs already have dedicated continuous delivery.
-  ACTION_FOR_EACH song IN BARDSONG C0BLDSO C0DANCSO C0DANCS2 C0STRASO BEGIN
+  ACTION_FOR_EACH song IN BARDSONG C0BARDSO C0BLDSO C0DANCSO C0DANCS2 C0STRASO BEGIN
     OUTER_SET $c0bw_owned_songs(~%song%~) = 1
   END
   ACTION_IF GAME_IS ~iwdee~ BEGIN
@@ -577,12 +682,18 @@ BEGIN
 END
 
 DEFINE_ACTION_FUNCTION c0bw_wrap_external_songs
+  RET external_wrappers
   RET_ARRAY c0bw_damaged_resources
 BEGIN
   OUTER_SET c0bw_projectile_serial = 0
+  OUTER_SET external_wrappers = 0
   ACTION_PHP_EACH c0bw_eligible_songs AS song => unused BEGIN
-    LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1 STR_VAR bardsong_name = EVAL ~%song%~
+    LAF c0bw_wrap_song INT_VAR preserve_projectiles = 1 templates_ready = 1 STR_VAR bardsong_name = EVAL ~%song%~
+      RET wrapped_song = song_name
       RET_ARRAY c0bw_damaged_resources
+    END
+    ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN
+      OUTER_SET external_wrappers += 1
     END
   END
 END
