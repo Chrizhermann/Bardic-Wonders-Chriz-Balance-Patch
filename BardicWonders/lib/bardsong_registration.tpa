@@ -627,7 +627,7 @@ END
 // shared IDs to the subsequent finite planner after committing the batch.
 DEFINE_ACTION_FUNCTION c0bw_patch_iwd_modal_songs
   INT_VAR iwd_jester_wrapper = 0
-  RET iwd_modal_present iwd_modal_ready iwd_stock_projectile iwd_enemy_projectile
+  RET iwd_modal_present iwd_stock_projectile iwd_enemy_projectile
   RET_ARRAY c0bw_damaged_resources
 BEGIN
   OUTER_SET iwd_modal_present = 0
@@ -636,6 +636,7 @@ BEGIN
   OUTER_SET iwd_enemy_projectile = 0
   ACTION_CLEAR_ARRAY c0bw_iwd_modal_songs
   ACTION_CLEAR_ARRAY c0bw_iwd_valid_songs
+  ACTION_CLEAR_ARRAY c0bw_batch_assets
   ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_iwd_modal_songs BEGIN
     SPCL115 => C0BWSIA
     SPCL116 => C0BWSIA
@@ -655,18 +656,13 @@ BEGIN
         LPM c0bw_guard_spl
         PATCH_IF c0bw_valid AND SHORT_AT 0x68 > 0 BEGIN
           SET $c0bw_iwd_valid_songs(~%song%~) = 1
+          SET $c0bw_batch_assets(~%profile%~) = 1
           SET iwd_modal_present = 1
         END
       BUT_ONLY
     END
   END
   ACTION_IF iwd_modal_present BEGIN
-    ACTION_CLEAR_ARRAY c0bw_batch_assets
-    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN
-      C0BWSPA => 1
-      C0BWSIW => 1
-      C0BWSIA => 1
-    END
     LAF c0bw_plan_core_projectiles STR_VAR batch = ~the native IWD modal projectiles~
       RET iwd_modal_ready = profiles_ready core_base core_end
       RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
@@ -674,8 +670,12 @@ BEGIN
     END
     ACTION_IF iwd_modal_ready BEGIN
       LAF c0bw_commit_core_projectiles END
-      OUTER_SET iwd_stock_projectile = $c0bw_core_bindings(C0BWSPA)
-      OUTER_SET iwd_enemy_projectile = $c0bw_core_bindings(C0BWSIW)
+      ACTION_IF VARIABLE_IS_SET $c0bw_core_bindings(C0BWSPA) BEGIN
+        OUTER_SET iwd_stock_projectile = $c0bw_core_bindings(C0BWSPA)
+      END
+      ACTION_IF VARIABLE_IS_SET $c0bw_core_bindings(C0BWSIW) BEGIN
+        OUTER_SET iwd_enemy_projectile = $c0bw_core_bindings(C0BWSIW)
+      END
       ACTION_PHP_EACH c0bw_iwd_modal_songs AS song => profile BEGIN
         ACTION_IF VARIABLE_IS_SET $c0bw_iwd_valid_songs(~%song%~) BEGIN
           COPY_EXISTING ~%song%.SPL~ ~override~

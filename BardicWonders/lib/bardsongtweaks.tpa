@@ -59,127 +59,141 @@ ACTION_IF FILE_EXISTS_IN_GAME ~C0BWHL8.spl~ THEN BEGIN
 END
 
 OUTER_SET iwd_modal_present = 0
-OUTER_SET iwd_modal_ready = 0
+OUTER_SET iwd_stock_projectile = 0
+OUTER_SET iwd_enemy_projectile = 0
 OUTER_SET iwd_jester_wrapper = 0
 ACTION_IF GAME_IS ~iwdee~ BEGIN
   OUTER_SET iwd_jester_wrapper = MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~1002~
   LAF c0bw_patch_iwd_modal_songs INT_VAR iwd_jester_wrapper
-    RET iwd_modal_present iwd_modal_ready iwd_stock_projectile iwd_enemy_projectile
+    RET iwd_modal_present iwd_stock_projectile iwd_enemy_projectile
     RET_ARRAY c0bw_damaged_resources
-  END
-END
-
-OUTER_SET profiles_ready = 0
-OUTER_SET core_pending = 0
-OUTER_SET plan_attempted = loader_ready AND templates_ready AND support_ready
-OUTER_SET stock_bard_projectile = 1
-ACTION_IF plan_attempted BEGIN
-  ACTION_CLEAR_ARRAY c0bw_batch_assets
-  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN
-    C0BARDSO => 1
-    C0BWSNP => 1
-  END
-  ACTION_IF NOT iwd_modal_ready BEGIN
-    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN C0BWSPA => 1 END
-    ACTION_IF iwd_jester_wrapper BEGIN
-      ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN C0BWSIW => 1 END
-    END
-  END
-  ACTION_IF FILE_EXISTS_IN_GAME ~C0BDD#SO.SPL~ BEGIN
-    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN C0BDD#SO => 1 END
-  END
-  LAF c0bw_plan_core_projectiles RET profiles_ready core_base core_end
-    RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
-      c0bw_resolved_projectiles c0bw_damaged_resources
-  END
-  ACTION_IF profiles_ready BEGIN
-    OUTER_SET core_pending = 1
-    OUTER_SET c0bardso = $c0bw_core_bindings(C0BARDSO)
-    OUTER_SET song_narrow_enemy_projectile = $c0bw_core_bindings(C0BWSNP)
-    OUTER_SET song_enemy_projectile = song_narrow_enemy_projectile
-    ACTION_IF iwd_modal_ready BEGIN
-      OUTER_SET song_party_projectile = iwd_stock_projectile
-      OUTER_SET song_enemy_projectile = iwd_enemy_projectile
-    END ELSE BEGIN
-      OUTER_SET song_party_projectile = $c0bw_core_bindings(C0BWSPA)
-      ACTION_IF iwd_jester_wrapper BEGIN
-        OUTER_SET song_enemy_projectile = $c0bw_core_bindings(C0BWSIW)
-      END
-    END
-    ACTION_IF GAME_IS ~iwdee~ BEGIN
-      OUTER_SET stock_bard_projectile = song_party_projectile
-    END
   END
 END
 
 ACTION_CLEAR_ARRAY c0bw_owned_songs
 ACTION_CLEAR_ARRAY c0bw_owned_finite_songs
 ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN
-  FJBARDA => song_party_projectile
-  FJBLADEB => song_party_projectile
-  FJBARDB => stock_bard_projectile
-  C0ABETSO => song_party_projectile
-  C0KM#SO => song_party_projectile
-  C0KM#SOH => song_party_projectile
-  C0SKD02A => song_party_projectile
-  C0TRBSO => song_party_projectile
-  C0TRBSO2 => song_party_projectile
+  FJBARDA => C0BWSPA
+  FJBLADEB => C0BWSPA
+  FJBARDB => 1
+  C0ABETSO => C0BWSPA
+  C0KM#SO => C0BWSPA
+  C0KM#SOH => C0BWSPA
+  C0SKD02A => C0BWSPA
+  C0TRBSO => C0BWSPA
+  C0TRBSO2 => C0BWSPA
   C0DESP7 => 1
   C0DESP9 => 1
-  C0BDD#S2 => song_narrow_enemy_projectile
-  C0JES03A => song_narrow_enemy_projectile
-  C0SDRUS2 => song_narrow_enemy_projectile
-  C0SDRUSO => song_narrow_enemy_projectile
+  C0BDD#S2 => C0BWSNP
+  C0JES03A => C0BWSNP
+  C0SDRUS2 => C0BWSNP
+  C0SDRUSO => C0BWSNP
 END
 ACTION_IF NOT GAME_IS ~iwdee~ BEGIN
   ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN
-    SPCL542A => song_party_projectile
-    SPCL920A => song_party_projectile
-    SPCL751A => song_enemy_projectile
+    SPCL542A => C0BWSPA
+    SPCL920A => C0BWSPA
+    SPCL751A => C0BWSNP
   END
-END ELSE ACTION_IF iwd_jester_wrapper BEGIN
-  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN SPCL751A => song_enemy_projectile END
-END
-ACTION_IF FILE_EXISTS_IN_GAME ~C0BDD#SO.SPL~ BEGIN
-  OUTER_SET $c0bw_owned_songs(C0BDD#SO) = 1
-  ACTION_IF profiles_ready AND VARIABLE_IS_SET $c0bw_core_bindings(C0BDD#SO) BEGIN
-    OUTER_SET darkbloom_projectile = $c0bw_core_bindings(C0BDD#SO)
-    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN C0BDD#SO => darkbloom_projectile END
+END ELSE BEGIN
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN FJBARDB => C0BWSPA END
+  ACTION_IF iwd_jester_wrapper BEGIN
+    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN SPCL751A => C0BWSIW END
   END
 END
-
+ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN
+  C0BDD#SO => C0BDD#SO
+  C0ABETS2 => C0BWSPA
+END
 ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
   OUTER_SET $c0bw_owned_songs(~%song%~) = 1
 END
-OUTER_SET $c0bw_owned_songs(C0ABETS2) = 1
 LAF c0bw_find_external_songs RET_ARRAY c0bw_eligible_songs c0bw_damaged_resources END
 
+OUTER_SET plan_attempted = loader_ready AND templates_ready AND support_ready
 OUTER_SET finite_ready = 0
 OUTER_SPRINT symphony_payload ""
-ACTION_IF profiles_ready BEGIN
-  OUTER_SET installed_wrappers = 0
+ACTION_IF plan_attempted BEGIN
+  ACTION_CLEAR_ARRAY c0bw_batch_assets
+  ACTION_CLEAR_ARRAY c0bw_native_profiles
+  ACTION_CLEAR_ARRAY c0bw_finite_targets
+  OUTER_SET has_finite_target = 0
+  ACTION_IF iwd_stock_projectile > 0 BEGIN
+    OUTER_SET $c0bw_native_profiles(C0BWSPA) = iwd_stock_projectile
+  END
+  ACTION_IF iwd_enemy_projectile > 0 BEGIN
+    OUTER_SET $c0bw_native_profiles(C0BWSIW) = iwd_enemy_projectile
+  END
+
+  // Keep the owned set for discovery, but reserve only the profiles of
+  // owned spells with valid ability headers. Native bindings are already live.
   ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
-    LAF c0bw_wrap_song INT_VAR payload_projectile = EVAL ~%profile%~ templates_ready = 1 core_pending
-      STR_VAR controller_pulse bardsong_name = EVAL ~%song%~
-      RET wrapped_song = song_name core_pending
-      RET_ARRAY c0bw_damaged_resources
+    ACTION_IF FILE_EXISTS_IN_GAME ~%song%.SPL~ BEGIN
+      COPY_EXISTING ~%song%.SPL~ ~override~
+        LPM c0bw_guard_spl
+        PATCH_IF c0bw_valid AND SHORT_AT 0x68 > 0 BEGIN
+          SPRINT $c0bw_finite_targets(~%song%~) ~%profile%~
+          SET has_finite_target = 1
+          PATCH_IF ~%profile%~ STRING_COMPARE ~1~ AND NOT VARIABLE_IS_SET $c0bw_native_profiles(~%profile%~) BEGIN
+            SET $c0bw_batch_assets(~%profile%~) = 1
+          END
+        END
+      BUT_ONLY
     END
-    ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN
-      OUTER_SET installed_wrappers += 1
+  END
+  ACTION_PHP_EACH c0bw_eligible_songs AS song => unused BEGIN
+    OUTER_SET has_finite_target = 1
+  END
+
+  ACTION_IF has_finite_target BEGIN
+    OUTER_SET $c0bw_batch_assets(C0BARDSO) = 1
+    LAF c0bw_plan_core_projectiles RET profiles_ready core_base core_end
+      RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
+        c0bw_resolved_projectiles c0bw_damaged_resources
+    END
+    ACTION_IF profiles_ready BEGIN
+      OUTER_SET core_pending = 1
+      OUTER_SET c0bardso = $c0bw_core_bindings(C0BARDSO)
+      OUTER_SET installed_wrappers = 0
+      OUTER_SET song_party_projectile = 0
+      ACTION_PHP_EACH c0bw_finite_targets AS song => profile BEGIN
+        OUTER_SET projectile = 0
+        ACTION_IF ~%profile%~ STRING_EQUAL ~1~ BEGIN
+          OUTER_SET projectile = 1
+        END ELSE ACTION_IF VARIABLE_IS_SET $c0bw_native_profiles(~%profile%~) BEGIN
+          OUTER_SET projectile = $c0bw_native_profiles(~%profile%~)
+        END ELSE ACTION_IF VARIABLE_IS_SET $c0bw_core_bindings(~%profile%~) BEGIN
+          OUTER_SET projectile = $c0bw_core_bindings(~%profile%~)
+        END
+        ACTION_IF ~%song%~ STRING_EQUAL ~C0ABETS2~ BEGIN
+          OUTER_SET song_party_projectile = projectile
+        END ELSE ACTION_IF projectile > 0 BEGIN
+          LAF c0bw_wrap_song INT_VAR payload_projectile = projectile templates_ready = 1 core_pending
+            STR_VAR controller_pulse bardsong_name = EVAL ~%song%~
+            RET wrapped_song = song_name core_pending
+            RET_ARRAY c0bw_damaged_resources
+          END
+          ACTION_IF ~%wrapped_song%~ STRING_COMPARE ~~ BEGIN
+            OUTER_SET installed_wrappers += 1
+          END
+        END
+      END
+      ACTION_IF song_party_projectile > 0 BEGIN
+        LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile templates_ready = 1 core_pending
+          STR_VAR controller_pulse bardsong_name = ~C0ABETS2~
+          RET symphony_payload = song_name core_pending
+          RET_ARRAY c0bw_damaged_resources
+        END
+        ACTION_IF ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
+          OUTER_SET installed_wrappers += 1
+        END
+      END
+      LAF c0bw_wrap_external_songs INT_VAR core_pending STR_VAR controller_pulse
+        RET external_wrappers RET_ARRAY c0bw_damaged_resources
+      END
+      OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
     END
   END
-  LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile templates_ready = 1 core_pending
-    STR_VAR controller_pulse bardsong_name = ~C0ABETS2~
-    RET symphony_payload = song_name core_pending
-    RET_ARRAY c0bw_damaged_resources
-  END
-  ACTION_IF ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
-    OUTER_SET installed_wrappers += 1
-  END
-  LAF c0bw_wrap_external_songs INT_VAR core_pending STR_VAR controller_pulse
-    RET external_wrappers RET_ARRAY c0bw_damaged_resources
-  END
-  OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
 END
 INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
 

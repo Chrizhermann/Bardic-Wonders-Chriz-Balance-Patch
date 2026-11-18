@@ -1247,6 +1247,7 @@ class Component2004ProducerTests(unittest.TestCase):
             missile.write_bytes(b"IDS V1.0\r\n525 Taken label\r\n523 Last label\r\n")
             (override / "FIREBALL.IDS").write_bytes(b"IDS V1.0\r\n0 NONE\r\n")
             self.seed_external_song_and_bard_text(override)
+            shutil.copyfile(MOD / "abettor/c0abets2.spl", override / "SPCL751A.SPL")
             result = self.install(root)
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertEqual(["525 C0BARDSO", "526 C0BWSPA", "527 C0BWSNP", "528 C0P0"],
@@ -1984,6 +1985,92 @@ class Component2004ProducerTests(unittest.TestCase):
             for name in {*profiles.values(), "C0BARDSO"}:
                 self.assertFalse((override / f"{name}.PRO").exists())
 
+    def test_iwd_damaged_sole_consumer_at_full_projectile_ceiling(self) -> None:
+        self.assert_iwd_unused_modal_profile_unallocated(missile_high=65535, zero_abilities=False)
+
+    def test_iwd_damaged_sole_consumer_keeps_last_projectile_pair_free(self) -> None:
+        self.assert_iwd_unused_modal_profile_unallocated(missile_high=65534, zero_abilities=False)
+
+    def test_iwd_zero_ability_sole_consumer_keeps_last_projectile_pair_free(self) -> None:
+        self.assert_iwd_unused_modal_profile_unallocated(missile_high=65534, zero_abilities=True)
+
+    def assert_iwd_unused_modal_profile_unallocated(self, *, missile_high: int, zero_abilities: bool) -> None:
+        with disposable_game() as root:
+            profiles = self.make_iwd_modal_fixture(root)
+            override = root / "override"
+            for spell in ("SPCL116", "SPCL117", "SPCL119", "SPCL120", "SPCL751A"):
+                profile = "C0BWSIW" if spell == "SPCL751A" else "C0BWSIA"
+                template = "SPCL118" if profile == "C0BWSIW" else "SPCL115"
+                shutil.copyfile(override / f"{template}.SPL", override / f"{spell}.SPL")
+                profiles[spell] = profile
+            unused_song = override / "SPCL920A.SPL"
+            unused = bytearray(unused_song.read_bytes()) if zero_abilities else bytearray(b"SPL V1  ")
+            if zero_abilities:
+                struct.pack_into("<H", unused, 0x68, 0)
+            unused_song.write_bytes(unused)
+            del profiles["SPCL920A"]
+            (root / "testmod/bardsong/c0bardx.spl").write_bytes(b"SPL V1  ")
+
+            ids = resource(override, "PROJECTL.IDS")
+            missiles = resource(override, "MISSILE.IDS")
+            ids.write_bytes(
+                b"IDS V1.0\r\n157 INAREAPA\r\n522 C0BWSPA\r\n522 XQFOREIGN\r\n524 C0BWSIW\r\n525 C0BWSIA\r\n"
+                + f"{missile_high - 1} XQHIGH\r\n".encode("ascii")
+            )
+            missiles.write_bytes(
+                b"IDS V1.0\r\n523 C0BWSPA\r\n525 C0BWSIW\r\n526 C0BWSIA\r\n"
+                + f"{missile_high} XQHIGH\r\n".encode("ascii")
+            )
+            before = ids.read_bytes(), missiles.read_bytes()
+
+            result = self.install(root, "--use-lang", "en_US")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assert_iwd_modal_profiles(override, profiles, {"C0BWSIA": 526, "C0BWSIW": 525})
+            self.assert_no_iwd_finite_grant(override)
+            self.assertEqual(unused, unused_song.read_bytes())
+            self.assertEqual(int(not zero_abilities), result.stdout.upper().count("SKIPPING DAMAGED SPCL920A.SPL"))
+            self.assertEqual(before, (ids.read_bytes(), missiles.read_bytes()))
+            self.assertFalse(list(override.glob("C0P*.PRO")))
+            self.assertFalse((override / "C0BWSPA.PRO").exists())
+
+    def test_bg2_unused_finite_profile_does_not_reserve_projectile_ids(self) -> None:
+        for capacity in (65534, 65535):
+            for variant in ("damaged", "missing", "zero-abilities"):
+                with self.subTest(capacity=capacity, variant=variant), disposable_game() as root:
+                    self.make_fixture(root, existing_projectile=520, snapshot=False)
+                    override = root / "override"
+                    party_song = override / "SPCL542A.SPL"
+                    party_song.write_bytes((MOD / "abettor/c0abets2.spl").read_bytes())
+                    unused_song = override / "SPCL751A.SPL"
+                    unused = bytearray(b"SPL V1  ") if variant == "damaged" else bytearray(party_song.read_bytes())
+                    if variant == "zero-abilities":
+                        struct.pack_into("<H", unused, 0x68, 0)
+                    if variant != "missing":
+                        unused_song.write_bytes(unused)
+                    ids, missiles = self.seed_projectile_registry(
+                        override,
+                        b"523 XQFOREIGN\r\n" + f"{capacity - 1} XQHIGH\r\n".encode("ascii"),
+                        f"{capacity} XQHIGH\r\n".encode("ascii"),
+                    )
+                    before = ids.read_bytes(), missiles.read_bytes()
+
+                    result = self.install(root)
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+                    wrapper = parse_spl(party_song)
+                    self.assertEqual({522}, {ability.projectile for ability in wrapper.abilities})
+                    pulse = wrapper.find_effects(opcode=272)[0].resource
+                    self.assertEqual({523}, {a.projectile for a in parse_spl(resource(override, pulse + ".SPL")).abilities})
+                    self.assertTrue(resource(override, "C0BWSPA.PRO").read_bytes()[0x0C] & 0x40)
+                    self.assertEqual(before, (ids.read_bytes(), missiles.read_bytes()))
+                    self.assertFalse(list(override.glob("C0P*.PRO")))
+                    self.assertFalse((override / "C0BWSNP.PRO").exists())
+                    if variant == "missing":
+                        self.assertFalse(unused_song.exists())
+                    else:
+                        self.assertEqual(unused, unused_song.read_bytes())
+                    self.assertEqual(int(variant == "damaged"), result.stdout.upper().count("SKIPPING DAMAGED SPCL751A.SPL"))
+
     def install(self, root: Path, *game_args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(WEIDU), "testmod/setup-test.tp2", "--no-auto-tp2", "--game", str(root), "--no-exit-pause",
@@ -1997,6 +2084,7 @@ class Component2004ProducerTests(unittest.TestCase):
         for projectile_seed in (558, 1200):
             with self.subTest(projectile_seed=projectile_seed), disposable_game() as root:
                 self.make_fixture(root, existing_projectile=projectile_seed, reserve_payload_name=bool(payloads))
+                shutil.copyfile(MOD / "abettor/c0abets2.spl", root / "override/SPCL751A.SPL")
                 result = self.install(root)
                 output = result.stdout + result.stderr
                 before = root / "producer-snapshot"
