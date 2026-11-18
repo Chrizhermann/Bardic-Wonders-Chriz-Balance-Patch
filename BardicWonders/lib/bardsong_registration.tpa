@@ -508,9 +508,9 @@ BEGIN
   END
 END
 
-// Stage the required profiles without materializing any PRO or IDS entry.
-// Keep fresh registrations and validated resources in the same plan.
+// Stage the requested profiles as one batch without writing PRO or IDS files.
 DEFINE_ACTION_FUNCTION c0bw_plan_core_projectiles
+  STR_VAR batch = "the required core projectiles"
   RET profiles_ready core_base core_end
   RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
     c0bw_resolved_projectiles c0bw_damaged_resources
@@ -528,9 +528,7 @@ BEGIN
   OUTER_SET new_count = 0
   OUTER_SET private_count = 0
   ACTION_FOR_EACH asset IN C0BARDSO C0BWSPA C0BWSNP C0BWSIW C0BWSIA C0BDD#SO BEGIN
-    ACTION_IF ((~%asset%~ STRING_COMPARE ~C0BWSIW~ AND ~%asset%~ STRING_COMPARE ~C0BWSIA~)
-      OR GAME_IS ~iwdee~)
-      AND (~%asset%~ STRING_COMPARE ~C0BDD#SO~ OR FILE_EXISTS_IN_GAME ~C0BDD#SO.SPL~) BEGIN
+    ACTION_IF VARIABLE_IS_SET $c0bw_batch_assets(~%asset%~) BEGIN
       OUTER_SPRINT legacy_label ~%asset%~
       OUTER_SPRINT packaged ~%MOD_FOLDER%/bardsong/projectiles/%asset%.PRO~
       ACTION_IF ~%asset%~ STRING_EQUAL ~C0BARDSO~ BEGIN
@@ -605,12 +603,12 @@ BEGIN
         END
       END
     END ELSE BEGIN
-      PRINT ~Bardic Wonders #2004: no projectile IDs available for the required core projectiles.~
+      PRINT ~Bardic Wonders #2004: no projectile IDs available for %batch%.~
     END
   END
 END
 
-// Called once, at the first wrapper that has passed every delivery check.
+// Called after the batch has an eligible native song or a validated wrapper.
 DEFINE_ACTION_FUNCTION c0bw_commit_core_projectiles BEGIN
   ACTION_PHP_EACH c0bw_core_bindings AS asset => projectile BEGIN
     OUTER_SPRINT resref $c0bw_resolved_projectiles(~%projectile%~)
@@ -622,6 +620,70 @@ DEFINE_ACTION_FUNCTION c0bw_commit_core_projectiles BEGIN
     OUTER_SPRINT symbol $c0bw_resolved_projectiles(~%projectile%~)
     OUTER_SPRINT missile_label $c0bw_core_labels(~%projectile%~)
     LAF c0bw_append_projectile INT_VAR projectile_base STR_VAR symbol missile_label RET projectile_base END
+  END
+END
+
+// Keep the native plan in its own WeiDU variable scope. Return the two
+// shared IDs to the subsequent finite planner after committing the batch.
+DEFINE_ACTION_FUNCTION c0bw_patch_iwd_modal_songs
+  INT_VAR iwd_jester_wrapper = 0
+  RET iwd_modal_present iwd_modal_ready iwd_stock_projectile iwd_enemy_projectile
+  RET_ARRAY c0bw_damaged_resources
+BEGIN
+  OUTER_SET iwd_modal_present = 0
+  OUTER_SET iwd_modal_ready = 0
+  OUTER_SET iwd_stock_projectile = 0
+  OUTER_SET iwd_enemy_projectile = 0
+  ACTION_CLEAR_ARRAY c0bw_iwd_modal_songs
+  ACTION_CLEAR_ARRAY c0bw_iwd_valid_songs
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_iwd_modal_songs BEGIN
+    SPCL115 => C0BWSIA
+    SPCL116 => C0BWSIA
+    SPCL117 => C0BWSIA
+    SPCL118 => C0BWSIW
+    SPCL119 => C0BWSIA
+    SPCL120 => C0BWSIA
+    SPCL542A => C0BWSIA
+    SPCL920A => C0BWSPA
+  END
+  ACTION_IF NOT iwd_jester_wrapper BEGIN
+    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_iwd_modal_songs BEGIN SPCL751A => C0BWSIW END
+  END
+  ACTION_PHP_EACH c0bw_iwd_modal_songs AS song => profile BEGIN
+    ACTION_IF FILE_EXISTS_IN_GAME ~%song%.SPL~ BEGIN
+      COPY_EXISTING ~%song%.SPL~ ~override~
+        LPM c0bw_guard_spl
+        PATCH_IF c0bw_valid AND SHORT_AT 0x68 > 0 BEGIN
+          SET $c0bw_iwd_valid_songs(~%song%~) = 1
+          SET iwd_modal_present = 1
+        END
+      BUT_ONLY
+    END
+  END
+  ACTION_IF iwd_modal_present BEGIN
+    ACTION_CLEAR_ARRAY c0bw_batch_assets
+    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN
+      C0BWSPA => 1
+      C0BWSIW => 1
+      C0BWSIA => 1
+    END
+    LAF c0bw_plan_core_projectiles STR_VAR batch = ~the native IWD modal projectiles~
+      RET iwd_modal_ready = profiles_ready core_base core_end
+      RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
+        c0bw_resolved_projectiles c0bw_damaged_resources
+    END
+    ACTION_IF iwd_modal_ready BEGIN
+      LAF c0bw_commit_core_projectiles END
+      OUTER_SET iwd_stock_projectile = $c0bw_core_bindings(C0BWSPA)
+      OUTER_SET iwd_enemy_projectile = $c0bw_core_bindings(C0BWSIW)
+      ACTION_PHP_EACH c0bw_iwd_modal_songs AS song => profile BEGIN
+        ACTION_IF VARIABLE_IS_SET $c0bw_iwd_valid_songs(~%song%~) BEGIN
+          COPY_EXISTING ~%song%.SPL~ ~override~
+            LPF ALTER_SPELL_HEADER INT_VAR projectile = $c0bw_core_bindings(~%profile%~) END
+          BUT_ONLY
+        END
+      END
+    END
   END
 END
 

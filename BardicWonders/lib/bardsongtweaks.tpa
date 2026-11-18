@@ -58,11 +58,36 @@ ACTION_IF FILE_EXISTS_IN_GAME ~C0BWHL8.spl~ THEN BEGIN
   BUT_ONLY
 END
 
+OUTER_SET iwd_modal_present = 0
+OUTER_SET iwd_modal_ready = 0
+OUTER_SET iwd_jester_wrapper = 0
+ACTION_IF GAME_IS ~iwdee~ BEGIN
+  OUTER_SET iwd_jester_wrapper = MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~1002~
+  LAF c0bw_patch_iwd_modal_songs INT_VAR iwd_jester_wrapper
+    RET iwd_modal_present iwd_modal_ready iwd_stock_projectile iwd_enemy_projectile
+    RET_ARRAY c0bw_damaged_resources
+  END
+END
+
 OUTER_SET profiles_ready = 0
 OUTER_SET core_pending = 0
 OUTER_SET plan_attempted = loader_ready AND templates_ready AND support_ready
 OUTER_SET stock_bard_projectile = 1
 ACTION_IF plan_attempted BEGIN
+  ACTION_CLEAR_ARRAY c0bw_batch_assets
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN
+    C0BARDSO => 1
+    C0BWSNP => 1
+  END
+  ACTION_IF NOT iwd_modal_ready BEGIN
+    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN C0BWSPA => 1 END
+    ACTION_IF iwd_jester_wrapper BEGIN
+      ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN C0BWSIW => 1 END
+    END
+  END
+  ACTION_IF FILE_EXISTS_IN_GAME ~C0BDD#SO.SPL~ BEGIN
+    ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_batch_assets BEGIN C0BDD#SO => 1 END
+  END
   LAF c0bw_plan_core_projectiles RET profiles_ready core_base core_end
     RET_ARRAY c0bw_core_bindings c0bw_core_labels c0bw_core_names
       c0bw_resolved_projectiles c0bw_damaged_resources
@@ -70,12 +95,18 @@ ACTION_IF plan_attempted BEGIN
   ACTION_IF profiles_ready BEGIN
     OUTER_SET core_pending = 1
     OUTER_SET c0bardso = $c0bw_core_bindings(C0BARDSO)
-    OUTER_SET song_party_projectile = $c0bw_core_bindings(C0BWSPA)
     OUTER_SET song_narrow_enemy_projectile = $c0bw_core_bindings(C0BWSNP)
     OUTER_SET song_enemy_projectile = song_narrow_enemy_projectile
+    ACTION_IF iwd_modal_ready BEGIN
+      OUTER_SET song_party_projectile = iwd_stock_projectile
+      OUTER_SET song_enemy_projectile = iwd_enemy_projectile
+    END ELSE BEGIN
+      OUTER_SET song_party_projectile = $c0bw_core_bindings(C0BWSPA)
+      ACTION_IF iwd_jester_wrapper BEGIN
+        OUTER_SET song_enemy_projectile = $c0bw_core_bindings(C0BWSIW)
+      END
+    END
     ACTION_IF GAME_IS ~iwdee~ BEGIN
-      OUTER_SET song_enemy_projectile = $c0bw_core_bindings(C0BWSIW)
-      OUTER_SET iwd_party_projectile = $c0bw_core_bindings(C0BWSIA)
       OUTER_SET stock_bard_projectile = song_party_projectile
     END
   END
@@ -106,7 +137,7 @@ ACTION_IF NOT GAME_IS ~iwdee~ BEGIN
     SPCL920A => song_party_projectile
     SPCL751A => song_enemy_projectile
   END
-END ELSE ACTION_IF MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~1002~ BEGIN
+END ELSE ACTION_IF iwd_jester_wrapper BEGIN
   ACTION_DEFINE_ASSOCIATIVE_ARRAY c0bw_owned_finite_songs BEGIN SPCL751A => song_enemy_projectile END
 END
 ACTION_IF FILE_EXISTS_IN_GAME ~C0BDD#SO.SPL~ BEGIN
@@ -150,39 +181,6 @@ ACTION_IF profiles_ready BEGIN
   END
   OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
 END
-// The Icewind Dale repertoire is already a native modal. Change its delivery
-// in place so the six selections and their continuous cadence are preserved.
-ACTION_IF GAME_IS ~iwdee~ AND finite_ready BEGIN
-  ACTION_FOR_EACH song IN SPCL115 SPCL116 SPCL117 SPCL119 SPCL120 SPCL542A BEGIN
-    COPY_EXISTING ~%song%.SPL~ ~override~
-      LPM c0bw_guard_spl
-      PATCH_IF c0bw_valid BEGIN
-        LPF ALTER_SPELL_HEADER INT_VAR projectile = iwd_party_projectile END
-      END
-    BUT_ONLY
-  END
-  COPY_EXISTING ~SPCL118.SPL~ ~override~
-    LPM c0bw_guard_spl
-    PATCH_IF c0bw_valid BEGIN
-      LPF ALTER_SPELL_HEADER INT_VAR projectile = song_enemy_projectile END
-    END
-  BUT_ONLY
-  COPY_EXISTING ~SPCL920A.SPL~ ~override~
-    LPM c0bw_guard_spl
-    PATCH_IF c0bw_valid BEGIN
-      LPF ALTER_SPELL_HEADER INT_VAR projectile = song_party_projectile END
-    END
-  BUT_ONLY
-  ACTION_IF NOT MOD_IS_INSTALLED ~BardicWonders/Setup-BardicWonders.tp2~ ~1002~ BEGIN
-    COPY_EXISTING ~SPCL751A.SPL~ ~override~
-      LPM c0bw_guard_spl
-      PATCH_IF c0bw_valid BEGIN
-        LPF ALTER_SPELL_HEADER INT_VAR projectile = song_enemy_projectile END
-      END
-    BUT_ONLY
-  END
-END
-
 INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~
 
 ACTION_CLEAR_ARRAY c0bw_bard_clabs
@@ -236,7 +234,7 @@ INCLUDE ~%MOD_FOLDER%/lib/bardsong_description.tpa~
        FINITE
 ACTIVE %finite_ready%
 >>>>>>>>
-ACTION_IF plan_attempted OR templates_rejected OR FILE_EXISTS_IN_GAME ~C0BWSYS.2DA~ BEGIN
+ACTION_IF iwd_modal_present OR plan_attempted OR templates_rejected OR FILE_EXISTS_IN_GAME ~C0BWSYS.2DA~ BEGIN
   COPY ~.../inlined/c0bw-song-state.2da~ ~override/C0BWSYS.2DA~
     EVALUATE_BUFFER
 END

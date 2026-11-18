@@ -1842,6 +1842,148 @@ class Component2004ProducerTests(unittest.TestCase):
                 self.assertTrue(data[0x0C] & 0x40, name)
                 self.assertEqual(radius, struct.unpack_from("<H", data, 0x204)[0], name)
 
+    def make_iwd_modal_fixture(self, root: Path) -> dict[str, str]:
+        self.make_fixture(root, existing_projectile=520, snapshot=False)
+        howparty = struct.pack("<8sHI", b"HOWPARTY", 0x3F4, 0)
+        (root / "chitin.key").write_bytes(b"KEY V1  " + struct.pack("<IIII", 0, 1, 24, 24) + howparty)
+        language = root / "lang/en_US"
+        language.mkdir(parents=True)
+        (root / "dialog.tlk").rename(language / "dialog.tlk")
+        override = root / "override"
+        profiles = {
+            "SPCL115": "C0BWSIA", "SPCL118": "C0BWSIW",
+            "SPCL542A": "C0BWSIA", "SPCL920A": "C0BWSPA",
+        }
+        for (spell, _), old_projectile in zip(profiles.items(), (456, 457, 456, 158)):
+            source = bytearray((MOD / "abettor/c0abets2.spl").read_bytes())
+            ability, = struct.unpack_from("<I", source, 0x64)
+            struct.pack_into("<H", source, ability + 0x26, old_projectile)
+            (override / f"{spell}.SPL").write_bytes(source)
+        (override / "CLABBA01.2DA").write_text(
+            "2DA V1.0\n****\n LEVEL1\nABILITY1 AP_C0BARDX\n",
+            encoding="ascii",
+        )
+        return profiles
+
+    def assert_iwd_modal_profiles(
+        self, override: Path, profiles: dict[str, str], expected: dict[str, int] | None = None
+    ) -> None:
+        ids = {}
+        for line in resource(override, "PROJECTL.IDS").read_text().splitlines():
+            fields = line.split()
+            if len(fields) == 2 and fields[0].isdigit():
+                ids[fields[1].upper()] = int(fields[0]) + 1
+        for spell, name in profiles.items():
+            with self.subTest(spell=spell):
+                self.assertTrue(resource(override, f"{name}.PRO").read_bytes()[0x0C] & 0x40)
+                abilities = parse_spl(resource(override, f"{spell}.SPL")).abilities
+                self.assertEqual({ids[name]}, {ability.projectile for ability in abilities})
+                if expected is not None:
+                    self.assertEqual(expected[name], ids[name])
+
+    def assert_no_iwd_finite_grant(self, override: Path) -> None:
+        self.assertEqual(["ACTIVE", "0"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+        self.assertNotIn("AP_C0BARDX", resource(override, "CLABBA01.2DA").read_text())
+
+    def test_iwd_native_modal_profiles_install_with_truncated_loader(self) -> None:
+        with disposable_game() as root:
+            profiles = self.make_iwd_modal_fixture(root)
+            override = root / "override"
+            (root / "testmod/bardsong/c0bardx.spl").write_bytes(b"SPL V1  ")
+
+            result = self.install(root, "--use-lang", "en_US")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assert_iwd_modal_profiles(override, profiles)
+            self.assert_no_iwd_finite_grant(override)
+            self.assertFalse((override / "C0BARDSO.PRO").exists())
+
+    def test_iwd_native_modal_profiles_reuse_at_ceiling_with_aliased_controller(self) -> None:
+        with disposable_game() as root:
+            profiles = self.make_iwd_modal_fixture(root)
+            override = root / "override"
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(
+                b"IDS V1.0\r\n157 INAREAPA\r\n521 C0BARDSO\r\n521 XQFOREIGN\r\n"
+                b"522 C0BWSPA\r\n523 C0BWSNP\r\n524 C0BWSIW\r\n525 C0BWSIA\r\n65534 XQHIGH\r\n"
+            )
+            missiles = resource(override, "MISSILE.IDS")
+            missiles.write_bytes(
+                b"IDS V1.0\r\n522 C0 Bardsong\r\n523 C0BWSPA\r\n524 C0BWSNP\r\n"
+                b"525 C0BWSIW\r\n526 C0BWSIA\r\n65535 XQHIGH\r\n"
+            )
+            before = ids.read_bytes(), missiles.read_bytes()
+
+            result = self.install(root, "--use-lang", "en_US")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assert_iwd_modal_profiles(override, profiles, {"C0BWSIA": 526, "C0BWSIW": 525, "C0BWSPA": 523})
+            self.assert_no_iwd_finite_grant(override)
+            self.assertEqual(before, (ids.read_bytes(), missiles.read_bytes()))
+            self.assertFalse(list(override.glob("C0P*.PRO")))
+            self.assertFalse((override / "C0BARDSO.PRO").exists())
+
+    def test_iwd_native_modal_batch_rejects_two_aliases_with_one_pair_free(self) -> None:
+        with disposable_game() as root:
+            profiles = self.make_iwd_modal_fixture(root)
+            override = root / "override"
+            (root / "testmod/bardsong/c0bardx.spl").write_bytes(b"SPL V1  ")
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(
+                b"IDS V1.0\r\n157 INAREAPA\r\n522 C0BWSPA\r\n524 C0BWSIW\r\n524 XQFOREIGN\r\n"
+                b"525 C0BWSIA\r\n525 XQOTHER\r\n65533 XQHIGH\r\n"
+            )
+            missiles = resource(override, "MISSILE.IDS")
+            missiles.write_bytes(
+                b"IDS V1.0\r\n523 C0BWSPA\r\n525 C0BWSIW\r\n526 C0BWSIA\r\n65534 XQHIGH\r\n"
+            )
+            paths = [ids, missiles, *(override / f"{spell}.SPL" for spell in profiles)]
+            before = [path.read_bytes() for path in paths]
+
+            result = self.install(root, "--use-lang", "en_US")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("no projectile IDs available for the native IWD modal projectiles", result.stdout)
+            self.assert_no_iwd_finite_grant(override)
+            self.assertEqual(before, [path.read_bytes() for path in paths])
+            self.assertFalse(list(override.glob("C0P*.PRO")))
+            for name in {*profiles.values(), "C0BARDSO"}:
+                self.assertFalse((override / f"{name}.PRO").exists())
+
+    def test_iwd_finite_wrapper_reuses_native_private_party_projectile(self) -> None:
+        with disposable_game() as root:
+            self.make_iwd_modal_fixture(root)
+            override = root / "override"
+            ids = resource(override, "PROJECTL.IDS")
+            ids.write_bytes(b"IDS V1.0\r\n157 INAREAPA\r\n522 C0BWSPA\r\n522 XQFOREIGN\r\n")
+            missiles = resource(override, "MISSILE.IDS")
+            missiles.write_bytes(b"IDS V1.0\r\n523 C0BWSPA\r\n")
+
+            result = self.install(root, "--use-lang", "en_US")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+            modal = parse_spl(resource(override, "SPCL920A.SPL")).abilities[0].projectile
+            wrapper = parse_spl(resource(override, "C0ABETS2.SPL"))
+            pulse = wrapper.find_effects(opcode=272)[0].resource
+            self.assertEqual(modal, parse_spl(resource(override, f"{pulse}.SPL")).abilities[0].projectile)
+            self.assertEqual(["C0P0.PRO"], [path.name.upper() for path in override.glob("C0P*.PRO")])
+            self.assertIn(f"{modal - 1} C0P0", ids.read_text().splitlines())
+            self.assertIn(f"{modal} C0P0", missiles.read_text().splitlines())
+
+    def test_iwd_native_profiles_require_a_patchable_native_song(self) -> None:
+        with disposable_game() as root:
+            profiles = self.make_iwd_modal_fixture(root)
+            override = root / "override"
+            (root / "testmod/bardsong/c0bardx.spl").write_bytes(b"SPL V1  ")
+            for spell in profiles:
+                (override / f"{spell}.SPL").write_bytes(b"SPL V1  ")
+            ids = resource(override, "PROJECTL.IDS")
+            missiles = resource(override, "MISSILE.IDS")
+            before = ids.read_bytes(), missiles.read_bytes()
+
+            result = self.install(root, "--use-lang", "en_US")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(before, (ids.read_bytes(), missiles.read_bytes()))
+            for name in {*profiles.values(), "C0BARDSO"}:
+                self.assertFalse((override / f"{name}.PRO").exists())
+
     def install(self, root: Path, *game_args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(WEIDU), "testmod/setup-test.tp2", "--no-auto-tp2", "--game", str(root), "--no-exit-pause",
