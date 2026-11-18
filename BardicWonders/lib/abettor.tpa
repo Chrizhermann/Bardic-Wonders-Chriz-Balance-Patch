@@ -194,7 +194,7 @@ Gaining the favor of the Lord of Shadows has its advantages. The Abettor of Mask
 
 INCLUDE ~%MOD_FOLDER%/lib/abettor_symphony.tpa~
 COPY ~%MOD_FOLDER%/abettor/c0abethl.spl~ ~override~
-  LPM c0bw_describe_symphony
+  LPF c0bw_describe_symphony END
 
 
 INCLUDE ~%MOD_FOLDER%/lib/song_projectile.tpa~

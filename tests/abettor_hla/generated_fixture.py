@@ -15,7 +15,7 @@ def generated_resources(root: Path, payload: str, projectile: int = 444, display
     # These are exactly the substitutions made by component 2004 after it
     # obtains a unique song name and registers the C0BARDSO projectile.
     for offset in range(effect_offset, len(controller), 48):
-        if controller[offset + 20:offset + 28].rstrip(b"\0").upper() == b"BARDSONG":
+        if controller[offset + 20:offset + 28].rstrip(b"\0").upper() == b"C0BARDSO":
             controller[offset + 20:offset + 28] = payload.encode().ljust(8, b"\0")
     (override / "C0ABETS2.SPL").write_bytes(controller)
     song = bytearray((ROOT / "BardicWonders/abettor/c0abets2.spl").read_bytes())

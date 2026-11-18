@@ -1,8 +1,14 @@
-DEFINE_PATCH_MACRO c0bw_describe_symphony BEGIN
+DEFINE_PATCH_FUNCTION c0bw_describe_symphony
+  INT_VAR with_finale = 1
+BEGIN
+  SPRINT finale_text ""
+  PATCH_IF with_finale BEGIN
+    SPRINT finale_text ~ All affected party members become invisible for one round when the song begins and for one round when the song ends. This is ordinary Invisibility and ends if the recipient attacks or casts a spell.~
+  END
   SAY NAME1 ~Symphony of the Dark Children~
   SAY NAME2 ~Symphony of the Dark Children~
-  SAY UNIDENTIFIED_DESC ~Symphony of the Dark Children
-The Abettor's song grants all affected party members +70% to all thieving skills, passive trap detection, Blur, a +3 bonus to Armor Class, a +1 bonus to all Saving Throws, and Non-Detection. The Abettor also gains Improved Invisibility for one round with each song pulse. All affected party members become invisible for one round when the song begins and for one round when the song ends. This is ordinary Invisibility and ends if the recipient attacks or casts a spell.
+  SAY_EVALUATED UNIDENTIFIED_DESC ~Symphony of the Dark Children
+The Abettor's song grants all affected party members +70% to all thieving skills, passive trap detection, Blur, a +3 bonus to Armor Class, a +1 bonus to all Saving Throws, and Non-Detection. The Abettor also gains Improved Invisibility for one round with each song pulse.%finale_text%
 
 This ability replaces the current Bard Song.~
 END

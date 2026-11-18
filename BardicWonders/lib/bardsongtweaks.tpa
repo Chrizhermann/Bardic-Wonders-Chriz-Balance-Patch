@@ -5,7 +5,7 @@ LAF c0bw_resolve_core_asset INT_VAR asset_type = 1
   STR_VAR asset = ~C0BARDX~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardx.spl~
   RET loader_ready = ready RET_ARRAY c0bw_damaged_resources
 END
-LAF c0bw_resolve_wrapper_templates RET templates_ready templates_rejected RET_ARRAY c0bw_damaged_resources END
+LAF c0bw_resolve_wrapper_templates RET templates_ready templates_rejected controller_pulse RET_ARRAY c0bw_damaged_resources END
 LAF c0bw_resolve_core_asset INT_VAR asset_type = 3
   STR_VAR asset = ~C0BARDSO~ packaged = EVAL ~%MOD_FOLDER%/bardsong/c0bardso.PRO~ missile_name = ~C0 Bardsong~
   RET controller_projectile_ready = ready RET_ARRAY c0bw_damaged_resources
@@ -178,7 +178,7 @@ ACTION_IF loader_ready AND templates_ready
   OUTER_SET installed_wrappers = 0
   ACTION_PHP_EACH c0bw_owned_finite_songs AS song => profile BEGIN
     LAF c0bw_wrap_song INT_VAR payload_projectile = EVAL ~%profile%~ templates_ready = 1
-      STR_VAR bardsong_name = EVAL ~%song%~
+      STR_VAR controller_pulse bardsong_name = EVAL ~%song%~
       RET wrapped_song = song_name
       RET_ARRAY c0bw_damaged_resources
     END
@@ -186,14 +186,15 @@ ACTION_IF loader_ready AND templates_ready
       OUTER_SET installed_wrappers += 1
     END
   END
-  LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile templates_ready = 1 STR_VAR bardsong_name = ~C0ABETS2~
+  LAF c0bw_wrap_song INT_VAR payload_projectile = song_party_projectile templates_ready = 1
+    STR_VAR controller_pulse bardsong_name = ~C0ABETS2~
     RET symphony_payload = song_name
     RET_ARRAY c0bw_damaged_resources
   END
   ACTION_IF ~%symphony_payload%~ STRING_COMPARE ~~ BEGIN
     OUTER_SET installed_wrappers += 1
   END
-  LAF c0bw_wrap_external_songs RET external_wrappers RET_ARRAY c0bw_damaged_resources END
+  LAF c0bw_wrap_external_songs STR_VAR controller_pulse RET external_wrappers RET_ARRAY c0bw_damaged_resources END
   OUTER_SET finite_ready = installed_wrappers + external_wrappers > 0
 END
 INCLUDE ~%MOD_FOLDER%/lib/abettor_hla_finite.tpa~

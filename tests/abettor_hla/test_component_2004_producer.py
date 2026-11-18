@@ -234,6 +234,33 @@ def assignment_parity_fixtures() -> dict[str, bytes]:
     }
 
 
+def retarget_controller_fixture(source: bytes, replacement: bytes) -> bytes:
+    data = bytearray(source)
+    effect_table, = struct.unpack_from("<I", data, 0x6A)
+    for offset in range(effect_table, len(data) - 47, 48):
+        if data[offset + 0x14:offset + 0x1C] == b"C0BARDSO":
+            data[offset + 0x14:offset + 0x1C] = replacement
+    return bytes(data)
+
+
+def add_controller_cue(source: bytes, name: bytes) -> tuple[bytes, tuple[bytes, ...]]:
+    data = bytearray(source)
+    abilities, count, table = struct.unpack_from("<IHI", data, 0x64)
+    field = abilities + 40 * (count - 1) + 0x1E
+    length, first = struct.unpack_from("<HH", data, field)
+    end = table + 48 * (first + length)
+    assert end == len(data)
+    cue_records = []
+    for opcode in (177, 272):
+        donor = next(bytes(data[offset:offset + 48]) for offset in range(table + 48 * first, end, 48)
+                     if struct.unpack_from("<H", data, offset)[0] == opcode)
+        cue = donor[:0x14] + name + donor[0x1C:]
+        cue_records.append(cue)
+        data.extend(cue)
+    struct.pack_into("<H", data, field, length + len(cue_records))
+    return bytes(data), tuple(cue_records)
+
+
 class Component2004ProducerTests(unittest.TestCase):
     def make_fixture(self, root: Path, *, existing_projectile: int, reserve_payload_name: bool = False, snapshot: bool = True) -> None:
         override = root / "override"
@@ -958,7 +985,7 @@ class Component2004ProducerTests(unittest.TestCase):
             song, _ = self.seed_external_song_and_bard_text(override)
             self.seed_bard_clabs(override)
             packaged = root / "testmod/bardsong/c0bardso.spl"
-            fallback = packaged.read_bytes().replace(b"BARDSONG", b"PREVPULS")
+            fallback = retarget_controller_fixture(packaged.read_bytes(), b"PREVPULS")
             (override / "C0BARDSO.SPL").write_bytes(fallback)
             packaged.write_bytes(b"SPL V1  ")
             result = self.install(root)
@@ -1040,6 +1067,119 @@ class Component2004ProducerTests(unittest.TestCase):
                 self.assertIn("AP_C0ABETT5", table.read_text().split())
                 self.assertFalse(any(path.name.upper() in {"C0ABETHL.SPL", "C0ABIVS.EFF", "C0ABIVI.SPL"}
                                      for path in override.iterdir()))
+
+    def test_fallback_preserves_an_existing_non_cast_cue(self) -> None:
+        for label, cue_present in (("installed fallback", True), ("packaged controller", False)):
+            with self.subTest(label=label), disposable_game() as root:
+                self.make_fixture(root, existing_projectile=520, snapshot=False)
+                override = root / "override"
+                song, _ = self.seed_external_song_and_bard_text(override)
+                self.seed_bard_clabs(override)
+                packaged = root / "testmod/bardsong/c0bardso.spl"
+                controller = packaged.read_bytes()
+                if cue_present:
+                    controller = retarget_controller_fixture(controller, b"PREVPULS")
+                controller, cue = add_controller_cue(controller, b"XQCUEREF")
+                if cue_present:
+                    (override / "C0BARDSO.SPL").write_bytes(controller)
+                    shutil.copy2(root / "testmod/bardsong/c0singin.EFF", override / "XQCUEREF.EFF")
+                    packaged.write_bytes(b"SPL V1  ")
+                else:
+                    # A packaged controller may have an additional unresolved
+                    # cue. The explicit template marker is still unique.
+                    packaged.write_bytes(controller)
+                result = self.install(root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(cue, effect_records(song)[1][-1][-2:])
+                self.assertNotIn(b"PREVPULS", song.read_bytes())
+                pulse = parse_spl(song).find_effects(opcode=272)[0].resource
+                pulse_eff = resource(override, f"{pulse}.EFF")
+                self.assertEqual(146, struct.unpack_from("<I", pulse_eff.read_bytes(), 0x10)[0])
+                self.assertEqual(pulse, read_eff_resource(pulse_eff))
+                payload = parse_spl(resource(override, f"{pulse}.SPL"))
+                ids = {int(index) + 1: name.upper() for index, name, *_ in
+                       (line.split() for line in resource(override, "PROJECTL.IDS").read_text().splitlines())
+                       if index.isdigit()}
+                private_projectile = ids[payload.abilities[0].projectile]
+                self.assertTrue(private_projectile.startswith("C0P"))
+                self.assertTrue(resource(override, private_projectile + ".PRO").read_bytes()[0x0C] & 0x40)
+                self.assertEqual(["ACTIVE", "1"], resource(override, "C0BWSYS.2DA").read_text().split()[-2:])
+
+    def test_fallback_with_two_pulse_candidates_is_rejected(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            packaged = root / "testmod/bardsong/c0bardso.spl"
+            controller = retarget_controller_fixture(packaged.read_bytes(), b"PREVPULS")
+            controller, _ = add_controller_cue(controller, b"OTHERPUL")
+            (override / "C0BARDSO.SPL").write_bytes(controller)
+            shutil.copy2(root / "testmod/bardsong/c0bardso.EFF", override / "OTHERPUL.EFF")
+            packaged.write_bytes(b"SPL V1  ")
+            self.assert_rejected_delivery_fallback(root, "C0BARDSO.SPL")
+
+    def test_missing_optional_finale_keeps_the_finite_symphony_grant(self) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            (root / "testmod/bardsong/c0singin.EFF").write_bytes(b"EFF V2.0")
+            table = resource(override, "LUC0ABET.2DA")
+            with table.open("a", encoding="ascii") as stream:
+                stream.write("C0ABET2 AP_C0ABETHL * * 1 99 1 AP_C0ABETT5 *\n")
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.upper().count("SKIPPING DAMAGED C0SINGIN.EFF"))
+            self.assertEqual(1, table.read_text().split().count("AP_C0ABETHL"))
+            self.assertFalse(any(path.name.upper() in {"C0ABIVS.EFF", "C0ABIVI.SPL"} for path in override.iterdir()))
+            controller = parse_spl(resource(override, "C0ABETS2.SPL"))
+            self.assertFalse(controller.find_effects(resource="C0ABIVS"))
+            pulse = next(e.resource for e in controller.abilities[0].effects if e.opcode == 272)
+            self.assertEqual(pulse, read_eff_resource(resource(override, f"{pulse}.EFF")))
+            hla_path = resource(override, "C0ABETHL.SPL")
+            hla = parse_spl(hla_path)
+            self.assertEqual(1, len(hla.find_effects(opcode=251, resource="C0ABETS2")))
+            self.assertEqual(1, len(hla.find_effects(opcode=326, resource="C0BARDX")))
+            self.assertEqual(1, len(hla.find_effects(opcode=309, resource=pulse)))
+            desc, = struct.unpack_from("<I", hla_path.read_bytes(), 0x50)
+            self.assertNotIn("when the song ends", tlk_string(root / "dialog.tlk", desc))
+
+    def test_invalid_later_donor_leaves_all_projectile_registrations_untouched(self) -> None:
+        self.assert_projectiles_unchanged_for_rejected_external_song(
+            last_id=523, second_donor=b"PRO V1.0", diagnostic="SKIPPING DAMAGED XQBADPRO.PRO",
+        )
+
+    def test_projectile_word_capacity_is_checked_for_the_whole_song(self) -> None:
+        self.assert_projectiles_unchanged_for_rejected_external_song(
+            last_id=65533, second_donor=(MOD / "bardsong/c0bardso.PRO").read_bytes(),
+            diagnostic="NO PROJECTILE IDS AVAILABLE FOR XQSONG.SPL",
+        )
+
+    def assert_projectiles_unchanged_for_rejected_external_song(self, *, last_id, second_donor, diagnostic) -> None:
+        with disposable_game() as root:
+            self.make_fixture(root, existing_projectile=520, snapshot=False)
+            override = root / "override"
+            ids = (b"IDS V1.0\r\n157 INAREAPA\r\n481 XQBADPRO\r\n521 C0BARDSO\r\n522 C0BWSPA\r\n"
+                   + f"{last_id} C0BWSNP\r\n".encode("ascii"))
+            index = resource(override, "PROJECTL.IDS")
+            index.write_bytes(ids)
+            (override / "XQBADPRO.PRO").write_bytes(second_donor)
+            song = bytearray((MOD / "abettor/c0abets2.spl").read_bytes())
+            duplicate_first_ability(song)
+            ability_table, = struct.unpack_from("<I", song, 0x64)
+            struct.pack_into("<H", song, ability_table + 40 + 0x26, 482)
+            source = override / "XQSONG.SPL"
+            source.write_bytes(song)
+            assignment = override / "XQASSIGN.SPL"
+            caller = (MOD / "abettor/c0abethl.spl").read_bytes().replace(b"C0ABETS2", b"XQSONG\0\0")
+            assignment.write_bytes(caller)
+            result = self.install(root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(1, result.stdout.upper().count(diagnostic))
+            self.assertEqual(song, source.read_bytes())
+            self.assertEqual(caller, assignment.read_bytes())
+            self.assertEqual(ids, index.read_bytes())
+            self.assertFalse(any(path.name.upper().startswith("C0P") and path.suffix.upper() == ".PRO"
+                                 for path in override.iterdir()))
+            self.assertEqual(second_donor, (override / "XQBADPRO.PRO").read_bytes())
 
     def test_projectile_donor_requires_all_type_specific_blocks(self) -> None:
         source = (MOD / "bardsong/c0bardso.PRO").read_bytes()
